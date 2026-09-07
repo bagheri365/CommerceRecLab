@@ -1,4 +1,4 @@
-"""Dataset and observation audit utilities for MatchLab v0.0.
+"""Dataset and observation audit utilities for CommerceRecLab legacy v0.0.
 
 The audit is intentionally descriptive. It reports what is present in an
 explicit-rating table without treating missing user-profile pairs as observed
@@ -106,8 +106,8 @@ def audit_dataframe(
     """Audit one explicit-rating table.
 
     Parameters are column names rather than dataset-specific assumptions so the
-    same audit can be run against a local Rice/LibimSeTi extract or a compatible
-    derivative. Reciprocal calculations use unique directed pairs; duplicate
+    same audit can be run against any compatible explicit-rating extract. This
+    legacy path will be replaced by the Retailrocket-specific v0.0 audit. Reciprocal calculations use unique directed pairs; duplicate
     rows are reported separately.
     """
 

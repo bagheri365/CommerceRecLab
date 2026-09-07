@@ -1,11 +1,11 @@
-"""Rendering helpers for MatchLab v0.0 dataset audits."""
+"""Rendering helpers for CommerceRecLab legacy v0.0 dataset audits."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from matchlab.audit.dataset import DatasetAudit
+from commercereclab.audit.dataset import DatasetAudit
 
 
 def _display(value: object) -> str:
@@ -27,7 +27,7 @@ def render_markdown(audit: DatasetAudit) -> str:
     r = audit.reciprocal
     rating = audit.rating
 
-    return f"""# MatchLab v0.0 — Dataset + Observation Audit
+    return f"""# CommerceRecLab legacy v0.0 — Dataset + Observation Audit
 
 Source: `{audit.source_path}`
 

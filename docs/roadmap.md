@@ -1140,8 +1140,6 @@ CommerceRecLab/
 └── docs/
 ```
 
-The package rename from `matchlab` to `commercereclab` should be done in a dedicated migration patch rather than mixed into the roadmap-only change.
-
 ---
 
 # README Structure

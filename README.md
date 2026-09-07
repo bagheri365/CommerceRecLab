@@ -1,11 +1,10 @@
-# MatchLab
+# CommerceRecLab
 
-**Controlled experiments in reciprocal recommendation, personalization, candidate generation, and two-sided marketplace system design for dating platforms.**
+**Research-oriented e-commerce recommender system for session intent, candidate generation, funnel-aware ranking, cold start, catalog exposure, and serving tradeoffs.**
 
-> **Research question:** How should a two-sided recommendation platform allocate limited attention when both participants have preferences, eligibility constraints, uncertain reciprocal opportunity, changing availability, and unequal exposure?
+> **Research question:** How should an e-commerce recommender balance user intent, product relevance, conversion opportunity, availability, catalog coverage, freshness, and serving cost?
 
-MatchLab is a research-minded system-design project for studying dating recommendation systems. It combines **empirical preference modeling on public rating data** with a **separate, explicitly controlled simulation layer** for production-style signals that the public dataset does not contain.
-
+CommerceRecLab is a system-design and experimentation project built around the Retailrocket e-commerce dataset. The project emphasizes reproducible offline evaluation, temporal correctness, candidate-generation quality, ranking tradeoffs, catalog behavior, and serving architecture rather than a single benchmark model.
 
 ## Scientific principle
 
@@ -13,164 +12,96 @@ MatchLab is a research-minded system-design project for studying dating recommen
 baseline → measurable failure → targeted intervention → evaluate → retain / reject
 ```
 
-Complexity must earn its place through evidence. Negative results are part of the project, not something to hide.
+Complexity must earn its place through evidence. Negative results and failed interventions remain part of the project record.
 
-## What is empirical vs. simulated?
+## Primary empirical dataset
 
-### Layer A — empirical preference modeling
+CommerceRecLab uses Retailrocket's public e-commerce behavior data:
 
-Uses observed profile ratings where the dataset supports the claim.
+```text
+events.csv
+item_properties_part1.csv
+item_properties_part2.csv
+category_tree.csv
+```
 
-Planned experiments include:
+The behavioral funnel contains timestamped:
 
-- popularity and shrinkage baselines
-- collaborative filtering
-- matrix factorization
-- pairwise ranking
-- sparse-history evaluation
-- reciprocal expressed-preference analysis, **only if reciprocal identity reconstruction is reliable**
+```text
+view → addtocart → transaction
+```
 
-### Layer B — controlled system-design environment
+The item-property tables provide time-varying product state, and the category tree provides hierarchical catalog structure.
 
-Uses clearly labeled synthetic or derived fields for signals unavailable in the public rating data, such as:
-
-- location
-- activity / freshness
-- eligibility state
-- market density
-- exposure counters
-- event timing
-- serving latency
-- expanded corpora for ANN scaling
-
-Results from this layer are claims about the **controlled experiment**, not about observed real-world dating behavior.
+Raw data are kept under `data/raw/` and are not committed to Git.
 
 ## Observation semantics
 
-An observed record means that user `A` provided an explicit rating for profile `B`.
+An observed event means that Retailrocket recorded a visitor-item event at a timestamp. It does **not** mean that every item without an event was shown and rejected.
 
 ```text
-observed A → B rating
-    = an explicit preference observation
+observed (visitor, item, event, time)
+    = recorded behavior
 
-unobserved A → B pair
-    = no rating is available
-    ≠ automatically a dislike, pass, or observed negative
+missing visitor-item pair
+    = no recorded event
+    ≠ observed negative
 ```
 
-The dataset does not provide a complete impression log showing every profile that was presented but left unrated. Ranking experiments therefore define their candidate sets and relevance construction explicitly rather than silently treating all missing pairs as negatives.
+Recommendation experiments therefore define candidate sets, labels, temporal cutoffs, and negative/comparison construction explicitly.
 
-See [`docs/data_semantics.md`](docs/data_semantics.md).
+Time-varying item properties must be joined **as of recommendation time**. Future product state must never leak into historical predictions.
+
+See [`docs/data_semantics.md`](docs/data_semantics.md) and the full [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Evaluation discipline
 
 Every empirical experiment must state:
 
-1. its prediction estimand;
-2. the train / validation / test unit;
-3. the candidate set used for ranking;
-4. how relevance is constructed;
-5. how comparison candidates or negatives are formed;
-6. what leakage is prohibited;
-7. which claims are supported by the result.
+1. the prediction or ranking estimand;
+2. the temporal train / validation / test split;
+3. the candidate universe;
+4. label construction;
+5. negative/comparison construction;
+6. point-in-time feature rules;
+7. prohibited leakage;
+8. which claims the result supports.
 
-Examples of distinct tasks include:
+The project distinguishes tasks such as next-item retrieval, event-type prediction, funnel-aware ranking, and transaction-oriented reranking rather than treating them as interchangeable.
 
-- **explicit-rating prediction:** predict a held-out 1–10 rating;
-- **ranking among observed candidates:** rank a defined held-out set using an explicit relevance rule;
-- **prospective reciprocal prediction:** hold out both `A → B` and `B → A` and predict both directions;
-- **conditional reciprocation:** observe one direction and estimate the other direction.
-
-These tasks are not interchangeable.
-
-## Reciprocal recommendation
-
-If reliable reciprocal pairs can be reconstructed, MatchLab will compare one-sided preference with reciprocal score fusion.
-
-For directional outputs `a = score(A → B)` and `b = score(B → A)`, candidate fusion rules include:
+## Planned system components
 
 ```text
-one-sided      a
-product        a * b
-minimum        min(a, b)
-harmonic mean  2ab / (a + b)
-weighted       αa + (1-α)b
+data audit
+→ observation & temporal semantics
+→ behavioral baselines
+→ session / user intent
+→ candidate generation
+→ feature hydration
+→ ranking
+→ funnel-aware reranking
+→ catalog / availability policy
+→ serving & graceful degradation
 ```
 
-When `a` and `b` are arbitrary ranking scores, these are treated as **score-fusion heuristics**. Probability language such as `P(A prefers B)` is used only when outputs have been evaluated for calibration; combining two directional probabilities also requires the relevant assumptions to be stated.
+Planned experiments include:
 
-## Cold start
-
-Cold-start evaluation is separated into distinct regimes:
-
-```text
-warm start       held-out interactions from known users
-sparse history   deliberately restricted training history
-new-user cold    entire behavioral history held out from model fitting
-```
-
-Profile-derived priors or synthetic metadata are kept separate from empirical behavioral claims when the real dataset does not contain the required features.
-
-## Candidate generation and marketplace experiments
-
-The controlled systems layer studies:
-
-- multi-source candidate retrieval
-- structured eligibility vs. semantic/vector retrieval
-- small-market liquidity and preference relaxation
-- activity/freshness
-- exposure concentration control
-- graceful degradation
-- serving latency
-- optional ANN scaling
-
-ANN experiments use an explicitly expanded corpus only for systems scaling. They are not presented as the natural scale of the original public dataset.
-
-## Planned metrics
-
-Depending on the experiment and label semantics:
-
-**Preference / ranking**
-- RMSE / MAE
-- AUC
-- Recall@K
-- NDCG@K
-- MRR
-- calibration diagnostics when probability interpretation is claimed
-
-**Reciprocal analysis**
-- reciprocal coverage
-- mutual expressed-preference proxy
-- reciprocal ranking quality
-- one-sided vs. reciprocal quality frontier
-
-**Candidate generation**
-- Recall@100 / Recall@500
-- source overlap
-- marginal source contribution
-
-**Marketplace / policy**
-- exposure Gini
-- catalog coverage
-- fallback frequency
-- market exhaustion rate
-
-**Systems**
-- p50 / p95 latency
-- throughput
-- cache hit rate
-- index memory
-
-## Statistical protocol
-
-Empirical experiments will use effect sizes and uncertainty estimates such as paired bootstrap confidence intervals, with the resampling unit chosen to match the estimand (for example, user-level or pair-level resampling).
-
-Controlled simulations will be repeated across random seeds and across scenario settings such as market density, activity heterogeneity, preference concentration, geography, and popularity skew. Simulation outcomes remain explicitly separate from empirical findings.
+- popularity and recency baselines;
+- co-visitation and session-based retrieval;
+- collaborative and latent retrieval;
+- multi-source candidate generation;
+- click / cart / transaction-aware ranking;
+- new-item and sparse-history behavior;
+- time-varying item-property features;
+- category-aware retrieval and reranking;
+- catalog exposure concentration and coverage;
+- exact vs. approximate retrieval at larger scale;
+- online serving, latency budgets, caching, and fallbacks.
 
 ## Repository structure
 
 ```text
-MatchLab/
+CommerceRecLab/
 ├── README.md
 ├── LICENSE
 ├── pyproject.toml
@@ -182,7 +113,7 @@ MatchLab/
 │   ├── roadmap.md
 │   └── data_semantics.md
 ├── src/
-│   └── matchlab/
+│   └── commercereclab/
 │       ├── data/
 │       ├── audit/
 │       ├── eligibility/
@@ -198,45 +129,34 @@ MatchLab/
 └── tests/
 ```
 
-## Build order
+Some package submodules still reflect the repository's earlier scaffold and will be migrated milestone-by-milestone as the Retailrocket implementation replaces the legacy audit path.
 
-The detailed roadmap lives in [`docs/roadmap.md`](docs/roadmap.md). The first implementation milestones are intentionally methodological:
+## Development
 
-```text
-v0.0  Dataset identity / schema audit
-v0.1  Observation & evaluation semantics
-v0.2  Eligibility semantics
-v0.3  One-sided preference baselines
-v0.4  Reciprocal-pair audit and reciprocal scoring, if supported
-...
+Create and activate a virtual environment, then install development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
 ```
 
-The project does **not** begin with a large deep-ranking architecture.
+Run the test suite:
 
-## First milestone
+```bash
+pytest
+```
 
-The first executable milestone should produce a reproducible dataset audit answering questions such as:
+Run lint checks:
 
-- What does each identifier represent?
-- Are user and profile identifiers in a shared identity space?
-- How many ratings, raters, and rated profiles are present?
-- What is the rating distribution?
-- How sparse is the observed matrix?
-- Can reciprocal `A → B` / `B → A` pairs be reconstructed reliably?
-- How much reciprocal coverage exists?
-- Are reciprocal pairs systematically different from one-directional observations?
-- What can and cannot be inferred from missing ratings?
+```bash
+ruff check .
+```
 
-No recommendation model should be trusted before these questions are answered.
+## Roadmap
 
-## Reproducibility
+The detailed, scientifically revised build plan lives in [`docs/roadmap.md`](docs/roadmap.md).
 
-The project targets a CPU-first workflow and favors deterministic, inspectable experiments before expensive models. Seeds, dataset transformations, split definitions, experiment configs, and generated artifacts should be versioned or reproducibly generated.
+The first Retailrocket milestones are methodological: establish the dataset contract, temporal observation semantics, and leakage-safe evaluation protocol before adding complex models.
 
-## Status
+## Scope and claim discipline
 
-**Early development.** The repository currently contains the scientific roadmap and project skeleton. Results will be added milestone by milestone rather than claimed in advance.
-
-## License
-
-Apache License 2.0. See [`LICENSE`](LICENSE).
+CommerceRecLab is not presented as a reproduction of any production retailer's recommender system. Results from Retailrocket support claims about the defined offline tasks and dataset. Systems simulations and scaling experiments are labeled separately and are not presented as observed production effects.

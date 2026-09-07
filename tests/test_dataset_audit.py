@@ -9,8 +9,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from matchlab.audit.dataset import audit_dataframe
-from matchlab.audit.report import render_markdown, write_reports
+from commercereclab.audit.dataset import audit_dataframe
+from commercereclab.audit.report import render_markdown, write_reports
 
 
 def sample_frame() -> pd.DataFrame:
@@ -108,7 +108,7 @@ def test_cli_writes_reports(tmp_path) -> None:
         [
             sys.executable,
             "-m",
-            "matchlab.audit",
+            "commercereclab.audit",
             str(data_path),
             "--user-col",
             "user_id",

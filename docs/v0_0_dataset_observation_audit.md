@@ -26,7 +26,7 @@ python -m pip install -e ".[dev]"
 Then run:
 
 ```bash
-python -m matchlab.audit path/to/ratings.csv \
+python -m commercereclab.audit path/to/ratings.csv \
   --user-col UserID \
   --profile-col ProfileID \
   --rating-col Rating \

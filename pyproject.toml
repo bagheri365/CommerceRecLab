@@ -3,13 +3,13 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "matchlab"
+name = "commercereclab"
 version = "0.1.0"
-description = "Controlled experiments for reciprocal recommendation and two-sided marketplace system design."
+description = "Research-oriented e-commerce recommender systems experiments and system design."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
-authors = [{name = "MatchLab contributors"}]
+authors = [{name = "Alireza Bagheri"}]
 dependencies = [
   "numpy>=1.26",
   "pandas>=2.2",

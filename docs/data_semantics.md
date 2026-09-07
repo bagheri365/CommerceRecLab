@@ -1,6 +1,6 @@
 # Data and Evaluation Semantics
 
-This document defines the minimum scientific contract for empirical experiments in MatchLab.
+This document defines the minimum scientific contract for empirical experiments in CommerceRecLab.
 
 ## 1. Observation unit
 
@@ -16,7 +16,7 @@ An unobserved pair means only that no rating is available in the dataset. It mus
 
 ## 2. Exposure limitation
 
-The public rating data do not constitute a complete impression log. Unless additional evidence establishes the exposure process, MatchLab does not assume that every unobserved profile was presented to the user.
+The public rating data do not constitute a complete impression log. Unless additional evidence establishes the exposure process, CommerceRecLab does not assume that every unobserved profile was presented to the user.
 
 Therefore every ranking experiment must define its candidate universe explicitly.
 
@@ -143,5 +143,5 @@ Do not infer from the public dataset alone:
 - real match probability;
 - conversation or reply probability;
 - relationship outcomes;
-- production Bumble behavior;
+- production marketplace behavior not recorded in the source data;
 - causal effects of a recommendation policy.

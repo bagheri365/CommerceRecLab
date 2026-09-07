@@ -1,12 +1,12 @@
-"""Command-line entry point for ``python -m matchlab.audit``."""
+"""Command-line entry point for ``python -m commercereclab.audit``."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from matchlab.audit.dataset import audit_csv
-from matchlab.audit.report import write_reports
+from commercereclab.audit.dataset import audit_csv
+from commercereclab.audit.report import write_reports
 
 
 def _delimiter(value: str) -> str:
