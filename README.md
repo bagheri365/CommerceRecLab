@@ -159,3 +159,15 @@ The first Retailrocket milestones are methodological: establish the dataset cont
 ## Scope and claim discipline
 
 CommerceRecLab is not presented as a reproduction of any production retailer's recommender system. Results from Retailrocket support claims about the defined offline tasks and dataset. Systems simulations and scaling experiments are labeled separately and are not presented as observed production effects.
+
+## v0.1 — Observation semantics
+
+After completing the dataset audit, measure which funnel paths are actually present in the event log:
+
+```bash
+python -m commercereclab.evaluation.observation \
+  data/raw/retailrocket/events.csv \
+  --output-dir artifacts/v0_1_observation_semantics
+```
+
+This milestone is descriptive. It does not infer recommendation impressions or convert missing visitor-item pairs into negatives. See [`docs/v0_1_observation_semantics.md`](docs/v0_1_observation_semantics.md).
