@@ -1,19 +1,20 @@
-# MatchLab — Bumble-Focused Dating Recommendation System Design Roadmap
+# CommerceRecLab — E-Commerce Recommendation System Design Roadmap
 
 ## Final Project Thesis
 
-**How should a two-sided dating recommender balance individual preference, reciprocal opportunity, eligibility, market liquidity, and serving cost?**
+**How should an e-commerce recommender balance user intent, product relevance, conversion opportunity, availability, catalog coverage, freshness, and serving cost?**
 
-This project is designed as system-design preparation for dating / matching platforms.
+This project is designed as a research-minded system-design study for large-scale e-commerce recommendation.
 
-The goal is not to build a generic recommender or to pretend a public dating dataset contains all of the signals used by a production dating app.
+The goal is not to build a generic recommender or to pretend a public clickstream dataset contains every signal available to a production retailer.
 
 The goal is to:
 
-1. use real interaction data where it is scientifically valid,
-2. use controlled simulation where production-style signals are unavailable,
-3. keep those two layers explicitly separate,
-4. use experiments to justify architectural complexity.
+1. use real behavioral and item data where scientifically valid,
+2. define observation and evaluation semantics before modeling,
+3. use controlled simulation only where production signals are unavailable,
+4. justify architectural complexity experimentally,
+5. preserve negative results and limitations.
 
 ---
 
@@ -23,533 +24,403 @@ The goal is to:
 
 Every milestone should answer one narrow systems question.
 
-Preserve negative results.
-
 Do not add architecture merely because it is common in industry.
 
 ---
 
 # 0. Data Reality Check
 
-## v0.0 — Dataset Audit
-
-Before modeling anything, audit the dating dataset.
+## v0.0 — Retailrocket Dataset + Observation Audit
 
 ### Primary Dataset
 
-Use the public Rice / online-dating recommendation dataset.
+Use the public **Retailrocket Recommender System Dataset** as the primary empirical source.
 
-It is appropriate for:
-
-- user-to-profile preference modeling
-- collaborative filtering
-- matrix factorization
-- rating prediction
-- ranking from historical preference observations
-- sparse-history analysis
-
-It is not sufficient by itself for:
-
-- precise geographic recommendation
-- rich profile-text understanding
-- real-time activity modeling
-- message / reply optimization
-- actual match outcomes
-- relationship outcomes
-- production-scale ANN evaluation
-
----
-
-## Reciprocal-Pair Audit
-
-A critical first question is:
-
-> **Can the dataset reliably identify both A → B and B → A observations for the same real pair?**
-
-The audit should determine:
-
-- whether user IDs and profile IDs share the same identity space,
-- whether reciprocal observations can be reconstructed,
-- how many bidirectional pairs exist,
-- whether bidirectional observations are dense enough for evaluation,
-- whether those pairs are systematically different from one-directional observations.
-
-### If Reliable Reciprocal Pairs Exist
-
-Evaluate reciprocal preference directly on the observed subset.
-
-Use language such as:
-
-> mutual expressed preference among observed bidirectional pairs
-
-### If They Do Not
-
-Do not claim observed reciprocal-match evaluation.
-
-Instead:
-
-- keep one-sided preference modeling empirical,
-- treat reciprocal scoring as a controlled architectural experiment,
-- clearly mark any reciprocal counterparty signal as simulated or derived.
-
----
-
-# 1. Separate Real Data From Controlled System Simulation
-
-The project should contain two explicit experimental layers.
-
-## Layer A — Empirical Preference Modeling
-
-Uses real dating interaction data.
+The local raw dataset contains:
 
 ```text
-observed ratings
-    ↓
-popularity baseline
-    ↓
-collaborative filtering
-    ↓
-matrix factorization
-    ↓
-pairwise ranking
-    ↓
-optional observed reciprocal analysis
+events.csv
+item_properties_part1.csv
+item_properties_part2.csv
+category_tree.csv
 ```
 
-Claims from this layer can concern:
+### Observed Behavior Table
 
-- observed preference prediction,
-- offline ranking,
-- sparse-history behavior,
-- reciprocal expressed preference if bidirectional observations support it.
-
----
-
-## Layer B — Controlled System-Design Environment
-
-Uses clearly labeled synthetic or derived fields to study production-style architecture.
+`events.csv` contains:
 
 ```text
-synthetic / controlled:
-location
-activity
-eligibility
-profile metadata
-market density
-exposure counters
-event timing
-serving latency
+timestamp
+visitorid
+event
+itemid
+transactionid
 ```
 
-This layer is for studying:
+Observed event types are:
 
+```text
+view
+addtocart
+transaction
+```
+
+The dataset contains roughly 2.76 million behavioral events over about 4.5 months.
+
+### Item Metadata
+
+The item-property files contain:
+
+```text
+timestamp
+itemid
+property
+value
+```
+
+Properties are time-dependent and represented as a change log.
+
+Important scientific limitation:
+
+- `categoryid` and `available` have interpretable semantics,
+- most other property names / values are anonymized or hashed,
+- hashed values may be useful for matching and representation learning,
+- they should not be presented as semantically interpretable attributes.
+
+### Category Hierarchy
+
+`category_tree.csv` contains:
+
+```text
+categoryid
+parentid
+```
+
+Use it to derive category ancestry, depth, siblings, and coarse hierarchical similarity.
+
+### v0.0 Audit Questions
+
+Before modeling, measure:
+
+- event row counts,
+- unique visitors,
+- unique items,
+- time range,
+- event-type frequencies,
+- null patterns,
+- duplicate event patterns,
+- visitor activity distribution,
+- item interaction distribution,
+- transaction-ID semantics,
+- item-property coverage,
+- temporal property updates,
+- availability coverage,
+- category coverage,
+- category-tree integrity,
+- orphan categories,
+- event/property temporal overlap.
+
+### Claims Supported by This Dataset
+
+The empirical layer can study:
+
+- implicit-feedback recommendation,
+- view / cart / transaction behavior,
+- next-item or future-interaction ranking,
+- session-aware recommendation after sessionization,
+- collaborative retrieval,
+- item-to-item transitions,
+- content / metadata-assisted recommendation,
+- item cold start where metadata exists,
+- temporal freshness,
+- observed availability,
+- category-aware retrieval,
+- catalog concentration,
 - candidate generation,
-- hard filtering,
-- market liquidity,
-- cold start,
-- freshness,
-- exposure,
-- serving architecture,
-- graceful degradation,
-- optional ANN scaling.
+- offline serving experiments.
 
-Do not present Layer B outcomes as observed real-world dating behavior.
+### Claims Not Directly Supported
+
+The dataset does not directly identify:
+
+- the complete set of products shown to a visitor,
+- products shown but ignored,
+- ranking position,
+- recommendation source / widget,
+- search queries,
+- prices in directly interpretable currency,
+- inventory quantity,
+- margin,
+- user demographics,
+- user intent labels,
+- causal effects of recommendations,
+- real production latency.
+
+Do not infer those as observed facts.
 
 ---
 
-# 2. Observation and Evaluation Semantics
+# 1. Observation and Exposure Semantics
 
-## v0.1 — Observation / Exposure Semantics
+## v0.1 — What Does an Event Mean?
 
 ### Question
 
-**What does an observed rating mean, what does an unobserved pair mean, and which prediction claims are identifiable from the dataset?**
+**What exactly is observed, and what does missingness mean?**
 
-The empirical dataset contains explicit profile ratings. Treat the observation unit precisely:
-
-```text
-observed(A → B)
-= user A provided an explicit rating for profile B
-```
-
-Do not assume:
+An observed event means the visitor interacted with an item through a recorded event.
 
 ```text
-unobserved(A → B)
-= A saw B and disliked / passed on B
+(visitor A, item B, view)
 ```
 
-The exposure process is not directly observed. Therefore, unrated pairs should not automatically be treated as observed negatives.
+means a view was logged.
+
+It does **not** establish the full recommendation slate or exposure mechanism that produced the interaction.
+
+Therefore:
+
+```text
+unobserved(A, B) != observed dislike
+unobserved(A, B) != observed exposure-with-no-click
+```
+
+Do not automatically treat every unseen item as a true negative.
+
+### Funnel Semantics
+
+Treat the observed funnel as progressively stronger implicit feedback:
+
+```text
+view → addtocart → transaction
+```
+
+But do not assume every transaction must have a recorded cart event or that every cart must have a prior recorded view without checking the data.
+
+Audit actual path frequencies first.
 
 ### Empirical Tasks
 
-Separate at least two tasks:
+Define tasks separately.
 
-```text
-Task A — explicit-rating prediction
-Given that A rated B, predict rating(A, B).
+#### Task A — Future Interaction Ranking
 
-Task B — ranking over a defined candidate set
-Given a clearly specified candidate set and relevance rule, rank profiles for A.
-```
+Given a visitor's history up to time `t`, rank items likely to receive a future event.
 
-Do not blur these tasks.
+#### Task B — Cart Intent Ranking
 
-### Relevance Construction
+Given history up to `t`, rank items likely to be added to cart.
 
-For ranking metrics, define the relevance rule explicitly. Examples:
+#### Task C — Transaction Ranking
 
-```text
-fixed threshold:
-relevant(A, B) = 1[rating(A, B) >= τ]
+Given history up to `t`, rank items likely to be purchased.
 
-user-relative threshold:
-relevant(A, B) = 1[rating(A, B) >= user-specific quantile estimated from training history only]
+#### Task D — Next-Item / Session Ranking
 
-graded relevance:
-gain = f(rating)
-```
+After defining sessions, predict the next interacted item.
 
-Report sensitivity to the relevance definition when conclusions depend on it.
-
-### Candidate-Set Semantics
-
-Every ranking experiment must specify:
-
-- which profiles are eligible candidates,
-- whether candidates come only from held-out observed ratings or include sampled / constructed alternatives,
-- how comparison negatives are constructed,
-- whether the same candidate policy is used across models,
-- whether any candidate construction step uses test information.
-
-If evaluation ranks only among held-out profiles that the user actually rated, describe the result as ranking among observed/held-out rated profiles. Do not treat that result as evidence that the system can retrieve relevant profiles from the full unseen population.
-
-### Split Regimes
-
-Define distinct evaluation regimes:
-
-```text
-warm-start preference
-→ hold out interactions from users seen in training
-
-sparse-history
-→ retain only a controlled number of training observations per user
-
-new-user cold start
-→ hold the user's behavioral history out from model fitting
-
-reciprocal-pair evaluation
-→ use pair-level holdout appropriate to the reciprocal estimand
-```
-
-If reliable timestamps are available, add temporal evaluation for deployment-style claims.
-
-If timestamps are not available, do not present random holdout results as prospective temporal performance.
-
-### Leakage Rules
-
-Freeze explicit leakage rules before experimentation.
-
-Examples:
-
-- no test labels in candidate construction,
-- no held-out behavioral history in zero-history cold-start training,
-- no reciprocal-direction leakage when evaluating prospective mutual preference,
-- preprocessing parameters fit only on training data,
-- user-relative thresholds or priors estimated only from training-side information,
-- hyperparameters selected only on validation data.
-
-### Statistical Unit
-
-Match the resampling unit to the claim:
-
-- user-level for user-centered ranking comparisons,
-- pair-level for reciprocal-pair experiments,
-- request-level only when requests are meaningfully independent.
+Do not silently mix these estimands.
 
 ---
 
-# 3. Eligibility Semantics
+# 2. Evaluation Protocol
 
-## v0.2 — Eligibility and Preference Types
+## v0.2 — Temporal Splits, Relevance, and Candidate Sets
 
 ### Question
 
-**Which conditions make a candidate invalid, and which merely affect ranking?**
+**How should offline evaluation approximate future recommendation without leakage?**
 
-Do not collapse all user settings into “hard constraints.”
+### Temporal Split
 
-Define four classes:
-
-```text
-1. mandatory eligibility
-2. hard user preference
-3. soft preference
-4. ranking feature
-```
+Prefer time-respecting splits.
 
 Example:
 
-| Signal | Type |
-|---|---|
-| blocked / excluded user | mandatory eligibility |
-| incompatible orientation / preference | mandatory eligibility |
-| safety / policy exclusion | mandatory eligibility |
-| age range | configurable hard preference |
-| distance | configurable hard preference |
-| relationship goal | hard or soft depending on product semantics |
-| interests | soft preference |
-| activity recency | ranking feature |
-| popularity / exposure | ranking or policy feature |
-
-### Engineering Goal
-
-The eligibility service should remove truly invalid candidates before ranking.
-
 ```text
-request
-  ↓
-mandatory eligibility
-  ↓
-hard preference filtering
-  ↓
-candidate generation
+train: earliest 70%
+validation: next 15%
+test: final 15%
 ```
 
-Soft signals should generally remain available to ranking.
+Exact cut points should be chosen after auditing the timestamp distribution.
+
+Never train on information whose effective timestamp is after the prediction time.
+
+### Item-Property Time Travel
+
+This is critical.
+
+For a recommendation at time `t`, use the most recent item-property value with:
+
+```text
+property_timestamp <= t
+```
+
+Do not hydrate historical examples with future item properties.
+
+### Relevance Definitions
+
+Evaluate separate objectives:
+
+```text
+view relevance
+cart relevance
+transaction relevance
+```
+
+For a multi-stage objective, define weights explicitly rather than hiding them.
+
+Example controlled objective:
+
+```text
+gain(view) = 1
+gain(addtocart) = 3
+gain(transaction) = 5
+```
+
+These weights are project assumptions, not observed business values.
+
+### Candidate-Set Semantics
+
+Report evaluation under clearly named candidate regimes.
+
+#### Full / Large Catalog Retrieval
+
+Rank against the eligible active catalog or a documented approximation.
+
+#### Sampled-Negative Evaluation
+
+If sampling is needed for speed, document:
+
+- sampling distribution,
+- number of negatives,
+- seed,
+- whether popular items are oversampled,
+- how metrics differ from full-catalog evaluation.
+
+Sampled evaluation must not be presented as equivalent to full-catalog retrieval.
+
+### Primary Offline Metrics
+
+Use metrics suited to ranking:
+
+- Recall@K,
+- NDCG@K,
+- MRR,
+- HitRate@K,
+- MAP@K where appropriate.
+
+Also track funnel-specific recall:
+
+- CartRecall@K,
+- TransactionRecall@K.
 
 ---
 
-# 4. One-Sided Preference Modeling
+# 3. Baselines
 
-## v0.3 — Preference Baselines
+## v0.3 — Non-Personalized and Behavioral Baselines
 
 ### Question
 
-**How well can the system predict whom user A is likely to prefer?**
+**How much value is obtained before adding complex personalization?**
 
 Start with:
 
-- global profile popularity,
-- shrinkage-adjusted average rating,
-- user-user collaborative filtering,
-- matrix factorization,
-- BPR / pairwise ranking.
-
-Do not introduce reciprocity yet.
-
-### Core Outputs
-
-Estimate:
-
 ```text
-preference_score(A, B)
+global popularity
+recent popularity
+category popularity
+visitor-history repeat
+item co-occurrence
+item-to-item transitions
 ```
 
-or, if calibrated appropriately:
+### Required Baselines
 
-```text
-P(A prefers B)
-```
+1. most-viewed items,
+2. most-carted items,
+3. most-purchased items,
+4. time-decayed popularity,
+5. last-item co-visitation,
+6. category-conditioned popularity.
 
-### Metrics
+### Evaluation
 
-Depending on the task and label construction:
+Report overall metrics and cohorts:
 
-- RMSE / MAE for explicit-rating prediction,
-- AUC for a clearly defined binary preference target,
-- Recall@K,
-- NDCG@K,
-- MRR.
-
-For every ranking metric, report the relevance definition and candidate-set construction alongside the score.
-
-Do not compare ranking metrics across experiments that silently use different candidate sets or different relevance thresholds.
+- new visitor,
+- sparse-history visitor,
+- repeat visitor,
+- head items,
+- mid-tail items,
+- long-tail items.
 
 ---
 
-# 5. Reciprocal Recommendation
+# 4. User Intent and Session Modeling
 
-## v0.4 — Reciprocal Scoring
+## v0.4 — Long-Term Visitor History vs Short-Term Intent
 
 ### Question
 
-**If both directional preference estimates are available, should ranking optimize one-sided preference or predicted reciprocity?**
+**When does short-term session intent outperform long-term visitor history?**
 
-Let:
+Retailrocket provides visitor IDs and timestamps, but not explicit session IDs.
+
+Sessionization is therefore a derived preprocessing decision.
+
+Compare inactivity thresholds such as:
 
 ```text
-a = score(A → B)
-b = score(B → A)
+15 minutes
+30 minutes
+60 minutes
 ```
+
+Freeze the chosen rule before downstream model comparisons.
+
+### Models
 
 Compare:
 
-### One-Sided
+- visitor-history popularity,
+- last-N interactions,
+- item co-visitation,
+- Markov / transition model,
+- matrix factorization,
+- session-aware hybrid.
 
-```text
-score = a
-```
+### Key Analysis
 
-### Product
+Measure performance as a function of:
 
-```text
-score = a * b
-```
-
-### Minimum
-
-```text
-score = min(a, b)
-```
-
-### Harmonic Mean
-
-```text
-score = 2ab / (a + b)
-```
-
-### Weighted Objective
-
-```text
-score =
-alpha * a
-+ (1 - alpha) * b
-```
+- session length,
+- visitor history depth,
+- recency,
+- category concentration.
 
 ---
 
-## Reciprocal Score Semantics
+# 5. Multi-Source Candidate Generation
 
-If `a` and `b` are arbitrary ranking scores, product / minimum / harmonic mean are score-fusion heuristics.
-
-Do not interpret:
-
-```text
-a * b
-```
-
-as a mutual-preference probability unless both directional outputs are calibrated probabilities and the required dependence assumptions are stated.
-
-Where possible, distinguish:
-
-```text
-raw_score(A → B)
-calibrated P(A expresses positive preference for B)
-```
-
-A learned reciprocal combiner may also be compared against hand-designed fusion rules, but only if the added complexity is justified by held-out evaluation.
-
-## Reciprocal Evaluation Rules
-
-If real bidirectional observations are available:
-
-- evaluate only on a frozen reciprocal subset,
-- report reciprocal coverage,
-- compare the reciprocal subset with the full population,
-- explicitly discuss selection bias,
-- define the reciprocal estimand before choosing the holdout policy.
-
-For prospective mutual-preference prediction:
-
-```text
-test pair {A, B}
-remove A → B and B → A from training
-```
-
-For conditional reciprocation prediction, observing one direction may be a legitimate input.
-
-Do not mix these two tasks in one metric.
-
-If reciprocal observations are not reliable:
-
-- mark this milestone as controlled modeling,
-- do not claim improvement in real match probability.
-
----
-
-# 6. Cold Start
-
-## v0.5 — Profile Priors to Behavioral Personalization
+## v0.5 — Retrieval Architecture
 
 ### Question
 
-**How should recommendation transition from profile-derived priors to behavioral signals as interaction history accumulates?**
-
-This is a strong system-design problem even if rich profile fields require a controlled benchmark.
-
-Model stages:
-
-```text
-0 interactions
-    → population / profile priors
-
-1–10 interactions
-    → profile + behavior
-
-10–50 interactions
-    → stronger behavioral model
-
-50+
-    → mature personalized model
-```
-
-### Possible Controlled Profile Fields
-
-Clearly mark these as synthetic / derived if not in the real dataset:
-
-- interests,
-- relationship goal,
-- lifestyle preferences,
-- profile quality score,
-- coarse location,
-- profile embedding.
-
-### Evaluation Cohorts
-
-- zero history,
-- sparse history,
-- medium history,
-- dense history.
-
-Define the split logic explicitly:
-
-```text
-zero history
-→ no behavioral interactions from the evaluation user are used to fit the behavioral model
-
-sparse history
-→ only a fixed small number of observations are retained for adaptation
-
-medium / dense history
-→ progressively more behavioral evidence is exposed
-```
-
-If profile priors depend on synthetic fields, report zero-history results as controlled-system results rather than empirical behavior from the public dataset.
-
-Question:
-
-> **At what history depth does behavioral personalization reliably outperform profile priors?**
-
----
-
-# 7. Multi-Source Candidate Generation
-
-## v0.6 — Candidate Retrieval Architecture
-
-### Question
-
-**How should the system reduce a very large eligible population to a few hundred candidates?**
-
-Use the controlled system-design layer.
+**How should the system reduce a large catalog to a few hundred high-recall candidates?**
 
 Candidate sources:
 
 ```text
-geographic / local pool
-collaborative retrieval
-latent-factor retrieval
-recently active pool
+recent popularity
+category popularity
+co-visitation
+item-to-item transitions
+collaborative latent retrieval
+metadata similarity
+repeat / revisit candidates
 exploration pool
 ```
 
@@ -565,186 +436,241 @@ union
    ↓
 deduplication
    ↓
+source-aware features
+   ↓
 candidate pool
 ```
 
 ### Candidate-Source Ablation
 
-Measure marginal contribution:
+Measure:
 
 ```text
-local only                       Recall@K
-+ collaborative                 ΔRecall
-+ latent / embedding source     ΔRecall
-+ active pool                   ΔRecall
-+ exploration                   ΔRecall
+source recall@100
+source recall@500
+unique hit contribution
+source overlap
+marginal recall contribution
 ```
 
 Question:
 
-> **Which source actually contributes unique useful candidates?**
+> **Which source actually contributes useful candidates that the others miss?**
 
 ---
 
-# 8. Hard Filtering vs Semantic / Vector Retrieval
+# 6. Ranking
 
-## v0.7 — Constraint Placement
+## v0.6 — Funnel-Aware Ranking
 
 ### Question
 
-**Where should structured eligibility constraints live relative to vector retrieval?**
+**Should the ranker optimize generic interaction likelihood or downstream conversion intent?**
+
+Candidate features may include:
+
+### Visitor Features
+
+- history length,
+- recency,
+- category preference distribution,
+- event-type counts,
+- repeat-item tendency.
+
+### Item Features
+
+- recent popularity,
+- cart rate,
+- transaction rate,
+- category,
+- category depth,
+- availability,
+- property embeddings / hashed-property representation,
+- freshness of latest property update.
+
+### Pair Features
+
+- visitor-item history,
+- co-visitation score,
+- transition score,
+- category affinity,
+- latent similarity,
+- source indicators.
+
+### Models
+
+CPU-first progression:
+
+```text
+logistic regression
+LightGBM / gradient-boosted trees
+matrix factorization score as feature
+optional compact neural/session model later
+```
+
+Do not begin with a large deep architecture.
+
+### Objectives
+
+Compare separate rankers for:
+
+```text
+future view
+future cart
+future transaction
+```
+
+and an explicitly weighted multi-task / blended objective.
+
+---
+
+# 7. Availability and Eligibility
+
+## v0.7 — Time-Valid Candidate Filtering
+
+### Question
+
+**Should unavailable products be filtered before retrieval, during retrieval, or during ranking?**
+
+Retailrocket exposes an `available` property where present.
+
+Construct historical availability using only information known at prediction time.
 
 Compare:
 
 ### Post-Filter
 
 ```text
-ANN
- ↓
-filter
+retrieve
+   ↓
+availability filter
 ```
 
 ### Pre-Filter
 
 ```text
-eligible pool
- ↓
-ANN
+available catalog
+   ↓
+retrieve
 ```
 
-### Hybrid Structured Retrieval
+### Hybrid
 
-```text
-structured constraints
-+
-semantic similarity
-```
+Structured availability constraints plus similarity retrieval.
 
 Measure:
 
 - valid-candidate rate,
 - candidate recall,
 - wasted retrieval work,
-- p95 latency,
-- result-set exhaustion.
+- result-set exhaustion,
+- latency.
 
-### Important Scope Note
-
-With the original dating dataset alone, ANN is not necessary at its natural scale.
-
-This milestone should initially use exact retrieval or small-scale vector search.
-
-Large ANN experiments belong later in the optional scaling appendix.
+Never use future availability states for historical recommendations.
 
 ---
 
-# 9. Market Liquidity
+# 8. Cold Start
 
-## v0.8 — Small-Market Behavior
-
-### Question
-
-**What should the recommender do when the eligible candidate pool becomes too small?**
-
-Simulate markets such as:
-
-```text
-dense market
-medium market
-sparse market
-```
-
-Track:
-
-```text
-eligible candidate count
-recommendation coverage
-fallback frequency
-```
-
-Implement progressive relaxation only for explicitly soft or relaxable preferences.
-
-Example:
-
-```text
-strict eligible pool
-    ↓
-too small?
-    ↓
-relax soft preference
-    ↓
-increase search radius if allowed
-    ↓
-widen freshness window
-    ↓
-inject exploration
-```
-
-Never silently relax:
-
-- policy exclusions,
-- safety constraints,
-- explicit non-negotiable eligibility rules.
-
----
-
-# 10. Activity and Freshness
-
-## v0.9 — Opportunity-to-Interact
+## v0.8 — New Visitor and New Item
 
 ### Question
 
-**Should a high-preference candidate be demoted if they are unlikely to be active?**
+**How should recommendation behave before sufficient behavioral history exists?**
 
-Controlled score:
+### New Visitor
+
+With zero visitor history:
 
 ```text
-score =
-preference
-* reciprocal_opportunity
-* activity_probability
+recent popularity
+category/context priors if available
+exploration
+```
+
+With sparse history:
+
+```text
+recent session intent
++ category affinity
++ co-visitation
+```
+
+### New Item
+
+Use metadata available at introduction time:
+
+```text
+category
+availability
+hashed properties
+category hierarchy
 ```
 
 Compare:
 
-- preference only,
-- preference + reciprocity,
-- preference + reciprocity + activity.
+- popularity-only fallback,
+- metadata similarity,
+- category-conditioned retrieval,
+- hybrid behavioral/content model.
 
-If activity is simulated, say so explicitly.
+### Scientific Split
 
-Do not claim real engagement improvement.
+A true new-item test must hold item behavior out prior to its simulated introduction point.
 
-### Metrics
-
-- fraction of stale candidates,
-- active-candidate coverage,
-- reciprocal proxy,
-- ranking quality.
+Do not call a warm item with withheld random interactions “cold start.”
 
 ---
 
-# 11. Exposure Concentration
+# 9. Temporal Freshness and Drift
+
+## v0.9 — Recency
+
+### Question
+
+**How quickly should the recommender react to changing demand and visitor intent?**
+
+Compare:
+
+- all-history popularity,
+- exponential decay,
+- rolling windows,
+- session-only intent,
+- hybrid long/short-term scores.
+
+Evaluate by time period to detect drift.
+
+Track:
+
+- ranking quality,
+- stale-item rate,
+- newly active item coverage,
+- category-shift responsiveness.
+
+---
+
+# 10. Catalog Exposure Concentration
 
 ## v0.10 — Attention Allocation
 
 ### Question
 
-**How should the system respond when the same highly popular profiles dominate recommendation exposure?**
+**How should the system respond when the same popular products dominate recommendations?**
 
-Measure:
+Measure recommendation-side concentration, not just observed interaction concentration.
 
-- profile exposure distribution,
-- Gini coefficient,
+Metrics:
+
+- catalog coverage,
+- recommendation Gini,
 - head / mid-tail / long-tail exposure,
-- catalog coverage.
+- unique items recommended,
+- category coverage.
 
-Introduce:
+Introduce a controlled reranker:
 
 ```text
-final_score =
-relevance_score
-- lambda * exposure_penalty
+final_score = relevance_score - lambda * exposure_penalty
 ```
 
 Compare:
@@ -752,60 +678,42 @@ Compare:
 - pure relevance,
 - exposure-aware reranking.
 
-Where possible, evaluate exposure sequentially:
+Call this **catalog exposure concentration control**.
 
-```text
-request t
-→ rank
-→ serve
-→ update exposure counters
-→ request t+1
-```
-
-Report the relevance / concentration frontier, for example:
-
-```text
-ΔNDCG@K vs ΔGini
-catalog coverage over time
-```
-
-Call this:
-
-> **exposure concentration control**
-
-Do not call it fairness unless a specific fairness objective is formally defined.
+Do not call it fairness unless a formal fairness objective is defined.
 
 ---
 
-# Controlled Simulation Protocol
+# 11. Controlled Marketplace Simulation
 
-For Layer B experiments, define the synthetic data-generating assumptions and vary them systematically.
+Retailrocket does not contain a complete impression/slate log or production serving environment.
 
-At minimum, vary scenarios such as:
+Simulation is allowed only for explicitly labeled system questions such as:
+
+- request arrival rate,
+- recommendation exposure counters,
+- cache behavior,
+- feature-store delay,
+- serving latency,
+- inventory shocks beyond observed availability,
+- large-corpus scaling.
+
+### Simulation Protocol
+
+For each synthetic factor, define a range rather than one arbitrary setting.
+
+Example:
 
 ```text
-market density:             sparse / medium / dense
-activity heterogeneity:     low / high
-geographic dispersion:      compact / dispersed
-preference concentration:   weak / strong
-popularity skew:            low / high
+traffic: low / medium / high
+catalog skew: weak / medium / strong
+cache hit rate: low / medium / high
+feature delay: 0 / 5 / 30 minutes
 ```
 
-For each scenario:
+Repeat across seeds and report variability.
 
-- run multiple random seeds,
-- report variability,
-- keep the simulation parameters in configuration files,
-- avoid interpreting one chosen parameter setting as representative of real dating behavior,
-- report where an intervention fails as well as where it helps.
-
-The scientific claim should be:
-
-> under these controlled assumptions, intervention X changes metric Y by Z
-
-not:
-
-> intervention X improves dating outcomes
+Do not present simulation outcomes as observed retailer behavior.
 
 ---
 
@@ -815,40 +723,49 @@ not:
 
 ### Question
 
-**How should the entire recommendation path fit within a latency and reliability budget?**
+**How should candidate generation and ranking fit inside a latency and reliability budget?**
 
 Architecture:
 
 ```text
-                     +----------------+
-Profile Updates ---->|  Profile Store |
-                     +--------+-------+
+Behavior Events ---------> Event Stream / Log
                               |
                               v
-                      Feature Pipeline
-                              |
-               +--------------+--------------+
-               |                             |
-               v                             v
-        Online Feature Store          Candidate Index
-               |                             |
-               +--------------+--------------+
-                              |
-                              v
-                      Candidate Service
-                              |
-                              v
-                       Feature Hydration
-                              |
-                              v
-                       Ranking Service
-                              |
-                              v
-                         Policy Layer
-                              |
-                              v
-                     Recommendation API
+                        Feature Pipeline
+                         /           \
+                        v             v
+               Online Feature     Offline Store
+                   Store              |
+                     |                v
+                     |          Model Training
+                     |                |
+                     |                v
+                     |           Model Registry
+                     |                |
+                     +-------+--------+
+                             |
+Request ----------------> Candidate Service
+                             |
+                             v
+                      Feature Hydration
+                             |
+                             v
+                        Ranking Service
+                             |
+                             v
+                       Policy / Filters
+                             |
+                             v
+                      Recommendation API
 ```
+
+Candidate indexes may include:
+
+- popularity cache,
+- co-visitation index,
+- category index,
+- latent-vector index,
+- availability-aware item set.
 
 ---
 
@@ -857,19 +774,14 @@ Profile Updates ---->|  Profile Store |
 Model events such as:
 
 ```text
-profile_view
-like
-pass
-match
-message
-reply
-unmatch
-profile_update
-location_update
-activity_ping
+view
+addtocart
+transaction
+item_property_update
+availability_update
 ```
 
-Flow:
+System flow:
 
 ```text
 event
@@ -885,37 +797,38 @@ offline training log
 
 Discuss:
 
-- event-time vs processing-time,
-- duplicate events,
+- event time vs processing time,
+- duplicates,
 - idempotency,
-- late-arriving events,
+- late events,
 - feature freshness,
 - backfills,
-- online / offline consistency.
+- online/offline consistency,
+- historical point-in-time joins.
 
 ---
 
 # 14. Example Latency Budget
 
-Use a hypothetical design target.
+Use a hypothetical design target, not a claimed production number.
 
-For example:
+Example:
 
 ```text
-Recommendation request: 150 ms p95
+Recommendation request: 120 ms p95
 
-eligibility / filters       15 ms
+request/context parsing      5 ms
 candidate retrieval         30 ms
 feature lookup              20 ms
-ranking                     35 ms
-policy reranking            10 ms
-network / serialization     20 ms
-headroom                    20 ms
---------------------------------
-total                      150 ms
+ranking                     30 ms
+policy/filtering            10 ms
+serialization/network       10 ms
+headroom                    15 ms
+---------------------------------
+total                      120 ms
 ```
 
-These are project design assumptions, not Bumble production numbers.
+These are project design assumptions.
 
 ---
 
@@ -926,57 +839,42 @@ Define fallbacks.
 Examples:
 
 ```text
-reciprocal model unavailable
-→ one-sided ranker
+personalized retrieval unavailable
+→ recent popularity / category popularity
 
-candidate index unavailable
-→ local / cached / popularity pool
+online features unavailable
+→ cached visitor state
 
-online feature missing
-→ population prior
+metadata lookup unavailable
+→ behavioral-only ranker
 
 expensive reranker timeout
 → lightweight ranker
 
-feature store slow
-→ cached features
+vector index unavailable
+→ co-visitation + popularity
 ```
 
-Measure degraded quality and latency.
+Measure both degraded latency and degraded quality.
 
 ---
 
-# 16. Optional ANN Scaling Appendix
+# 16. ANN / Retrieval Scaling
 
-## v0.12 — Expanded-Corpus Vector Retrieval
+## v0.12 — Approximate Retrieval
 
 ### Question
 
-**At what scale does approximate retrieval become justified on a single node?**
+**At what catalog size and query load does approximate vector retrieval earn its complexity?**
 
-The real Rice-style dataset is too small to make this a compelling ANN experiment by itself.
+Start with exact retrieval where practical.
 
-Therefore, if ANN is included:
+If latent or metadata embeddings are introduced, compare:
 
-- generate or construct an explicitly expanded candidate corpus,
-- preserve the original real interactions for preference evaluation,
-- use the expanded corpus only for systems scaling.
-
-Possible corpus sizes:
-
-```text
-10k
-100k
-500k
-1M+
-```
-
-Compare:
-
-- exact vector search,
+- exact dot-product search,
 - Faiss Flat,
 - HNSW,
-- IVF.
+- IVF where justified.
 
 Report:
 
@@ -985,56 +883,59 @@ Report:
 - p95 latency,
 - throughput,
 - memory,
-- build time.
+- index build time.
 
-Call this:
-
-> **controlled single-node ANN scaling**
-
-Do not imply it reflects the natural scale of the original dataset.
+ANN is retained only if latency/throughput gains justify quality and operational costs.
 
 ---
 
 # Offline Evaluation
 
-## One-Sided Preference
+## Retrieval
 
-- Recall@K
-- NDCG@K
-- MRR
-- RMSE / MAE if appropriate
-- AUC if preference is binarized
+- Recall@100,
+- Recall@500,
+- source overlap,
+- marginal source contribution,
+- ANNRecall@K where relevant.
 
-## Reciprocal Analysis
+## Ranking
 
-Only where scientifically supported:
+- Recall@K,
+- NDCG@K,
+- MRR,
+- HitRate@K,
+- CartRecall@K,
+- TransactionRecall@K.
 
-- reciprocal coverage
-- mutual expressed-preference proxy
-- reciprocal NDCG
-- one-sided vs reciprocal frontier
+## Cohorts
 
-## Candidate Generation
+- new visitors,
+- sparse-history visitors,
+- repeat visitors,
+- short sessions,
+- long sessions,
+- head items,
+- mid-tail items,
+- long-tail items,
+- new items.
 
-- Recall@100
-- Recall@500
-- source overlap
-- marginal source contribution
+## Catalog / Policy
 
-## Marketplace / Policy
-
-- exposure Gini
-- catalog coverage
-- fallback frequency
-- market exhaustion rate
+- catalog coverage,
+- recommendation Gini,
+- category coverage,
+- unavailable-item rate,
+- result-set exhaustion.
 
 ## Systems
 
-- p50 latency
-- p95 latency
-- throughput
-- cache hit rate
-- index memory
+- p50 latency,
+- p95 latency,
+- throughput,
+- cache hit rate,
+- index memory,
+- feature freshness.
 
 ---
 
@@ -1045,44 +946,24 @@ Document how a production experiment might be designed.
 Potential primary metrics:
 
 ```text
-mutual match rate
-conversation initiation
-reply rate
+click-through rate
+add-to-cart rate
+conversion rate
+revenue / order value if available in production
 ```
 
 Potential guardrails:
 
 ```text
-block / report rate
-unmatch rate
-session abandonment
 latency
+error rate
 recommendation exhaustion
+catalog concentration
+out-of-stock recommendation rate
+session abandonment
 ```
 
-Do not claim these metrics can be measured from the public dataset.
-
----
-
-# Two-Sided Experimentation Caveat
-
-A dating platform has network interference.
-
-Changing recommendations for user A can affect user B's experience.
-
-Therefore standard independent-user A/B assumptions may be imperfect.
-
-Discuss:
-
-- naive user-level randomization,
-- pair contamination,
-- network effects,
-- cluster / market randomization,
-- two-sided randomization,
-- switchback / temporal designs where appropriate,
-- interference-aware estimands.
-
-This is important system-design material.
+Do not claim these causal effects can be measured from Retailrocket's observational logs alone.
 
 ---
 
@@ -1093,23 +974,25 @@ Every major experiment should include manual failure analysis.
 Possible categories:
 
 ```text
-eligibility mistake
-candidate exhaustion
-popular-profile dominance
+candidate miss
+popular-item dominance
 cold-start failure
-one-sided false positive
-reciprocal-score collapse
-sparse-history failure
-stale candidate
-activity over-penalty
-candidate-source collapse
-policy overcorrection
+stale intent
+category mismatch
+unavailable-item leak
+metadata time-travel bug
+sessionization failure
+co-visitation collapse
+long-tail starvation
+ranker overweights views
+conversion objective collapse
 retrieval miss
+policy overcorrection
 ```
 
 Use a frozen sample.
 
-Do not create categories after selectively browsing only interesting failures.
+Do not create categories only after selectively browsing interesting failures.
 
 ---
 
@@ -1120,10 +1003,12 @@ For successful complex mechanisms, remove components one at a time.
 Example:
 
 ```text
-full policy
-- reciprocal term
-- activity
-- confidence gate
+full ranker
+- session features
+- category affinity
+- co-visitation score
+- availability feature
+- recency feature
 - exposure penalty
 ```
 
@@ -1137,12 +1022,13 @@ Question:
 
 For empirical experiments:
 
-- paired bootstrap confidence intervals,
-- user-level or pair-level resampling where appropriate,
-- effect sizes,
-- practical significance thresholds.
+- use paired bootstrap confidence intervals where appropriate,
+- resample at visitor or session level rather than individual rows when dependence matters,
+- report effect sizes,
+- report practical significance thresholds,
+- preserve temporal split boundaries.
 
-Report:
+Example:
 
 ```text
 ΔNDCG@10 = ...
@@ -1153,6 +1039,7 @@ For controlled simulations:
 
 - repeat across multiple random seeds,
 - report variability,
+- vary important simulation parameters,
 - distinguish simulation outcomes from empirical findings.
 
 ---
@@ -1163,28 +1050,36 @@ Set thresholds after measuring baseline variance, then freeze them before interv
 
 Examples:
 
-Retain reciprocal scoring only if:
+Retain a new candidate source only if:
 
 ```text
-reciprocal proxy improves materially
+candidate recall improves materially
 AND
-one-sided quality loss remains within tolerance
+latency / memory cost remains acceptable
 ```
 
 Retain exposure control only if:
 
 ```text
-exposure concentration drops materially
+catalog concentration drops materially
 AND
-ranking-quality loss remains acceptable
+ranking-quality loss remains within tolerance
 ```
 
 Retain ANN only if:
 
 ```text
-latency gain is meaningful
+latency or throughput improves materially
 AND
-quality loss stays below a fixed threshold
+retrieval-quality loss stays below a fixed threshold
+```
+
+Retain a conversion-aware ranker only if:
+
+```text
+cart / transaction ranking improves
+AND
+view-level relevance does not collapse beyond tolerance
 ```
 
 ---
@@ -1195,15 +1090,16 @@ The first version should run on a Mac CPU.
 
 Prefer:
 
-- matrix factorization
-- BPR
-- logistic regression
-- LightGBM
-- TF-IDF
-- compact embeddings
-- Faiss CPU
-- cached features
-- deterministic subsets
+- pandas / Polars where useful,
+- NumPy / SciPy sparse matrices,
+- logistic regression,
+- LightGBM or equivalent gradient boosting,
+- implicit matrix factorization,
+- co-visitation tables,
+- compact item embeddings,
+- Faiss CPU only when justified,
+- Parquet intermediate artifacts,
+- deterministic subsets for fast tests.
 
 Do not begin with a large deep-ranking architecture.
 
@@ -1212,22 +1108,26 @@ Do not begin with a large deep-ranking architecture.
 # Suggested Repository Structure
 
 ```text
-matchlab/
+CommerceRecLab/
 ├── README.md
 ├── pyproject.toml
 ├── CITATION.cff
 ├── LICENSE
 │
+├── data/
+│   ├── raw/              # gitignored
+│   ├── interim/          # gitignored
+│   └── processed/        # gitignored
+│
 ├── src/
-│   └── matchlab/
+│   └── commercereclab/
 │       ├── data/
 │       ├── audit/
-│       ├── eligibility/
+│       ├── sessions/
 │       ├── retrieval/
 │       ├── features/
 │       ├── models/
 │       ├── ranking/
-│       ├── reciprocity/
 │       ├── policy/
 │       ├── simulation/
 │       ├── serving/
@@ -1240,63 +1140,40 @@ matchlab/
 └── docs/
 ```
 
+The package rename from `matchlab` to `commercereclab` should be done in a dedicated migration patch rather than mixed into the roadmap-only change.
+
 ---
 
 # README Structure
 
 ```text
-# MatchLab
+# CommerceRecLab
 
-How should a two-sided dating recommender balance
-individual preference, reciprocal opportunity,
-eligibility, market liquidity, and serving cost?
+How should an e-commerce recommender balance
+user intent, product relevance, conversion opportunity,
+availability, catalog coverage, freshness, and serving cost?
 
 ## Why This Question Matters
-
+## Dataset
 ## What This Project Is Not
-
-## Dataset Audit
-
-## Real vs Simulated Experimental Layers
-
 ## Observation Semantics
-
 ## Evaluation Protocol
-
-## Eligibility Semantics
-
 ## Experimental Design
-
-## Preference Baselines
-
-## Reciprocal Analysis
-
-## Cold Start
-
+## Baselines
+## Session / Intent Modeling
 ## Candidate Generation
-
-## Liquidity
-
-## Activity / Freshness
-
-## Exposure Control
-
+## Ranking
+## Availability
+## Cold Start
+## Freshness
+## Catalog Exposure
 ## Serving Architecture
-
-## Latency Budget
-
 ## Failure Analysis
-
 ## Ablations
-
 ## Negative Results
-
 ## Statistical Protocol
-
 ## Limitations
-
 ## Reproducibility
-
 ## Conclusions
 ```
 
@@ -1305,131 +1182,144 @@ eligibility, market liquidity, and serving cost?
 # Recommended Build Order
 
 ```text
-v0.0 Dataset audit
-v0.1 Observation / evaluation semantics
-v0.2 Eligibility semantics
-v0.3 One-sided preference baseline
-v0.4 Reciprocal scoring, only if supported
-v0.5 Cold-start transition
-v0.6 Multi-source candidate generation
-v0.7 Constraint placement
-v0.8 Market liquidity
-v0.9 Activity / freshness
-v0.10 Exposure concentration
+v0.0  Dataset + observation audit
+v0.1  Observation / exposure semantics
+v0.2  Temporal evaluation protocol
+v0.3  Behavioral baselines
+v0.4  Session / intent modeling
+v0.5  Multi-source candidate generation
+v0.6  Funnel-aware ranking
+v0.7  Availability filtering
+v0.8  Cold start
+v0.9  Temporal freshness / drift
+v0.10 Catalog exposure concentration
 v0.11 Serving / degradation
-v0.12 Optional ANN scaling
+v0.12 ANN scaling if justified
 ```
 
 ---
 
 # Interview Questions This Project Should Prepare You For
 
-## Design a dating recommendation system.
+## Design an e-commerce recommendation system.
 
 Discuss:
 
 ```text
-eligibility
+request context
 → candidate generation
 → feature hydration
-→ preference ranking
-→ reciprocal opportunity
-→ policy reranking
+→ intent / relevance ranking
+→ availability / policy filtering
 → serving
 ```
 
-## How do you retrieve candidates from a huge population?
+## How do you retrieve from a large catalog?
 
 Discuss:
 
-- geo / structured eligibility,
-- collaborative candidate generation,
+- popularity pools,
+- category retrieval,
+- co-visitation,
+- collaborative retrieval,
 - embedding retrieval,
-- active pools,
-- multi-source union,
+- source union,
 - candidate recall.
 
-## How do you handle a new user?
+## How do you model short-term shopping intent?
+
+Discuss:
+
+- sessionization,
+- recency,
+- last-item transitions,
+- session vs long-term history,
+- intent drift.
+
+## How do you handle a new visitor?
 
 Discuss:
 
 ```text
-profile / population priors
+recent popularity
 → exploration
-→ sparse behavior
+→ first interaction
+→ session intent
 → mature personalization
 ```
 
-## What if a market has too few candidates?
+## How do you handle a new item?
 
 Discuss:
 
-- liquidity,
-- soft-preference relaxation,
-- radius expansion,
-- freshness expansion,
-- hard-constraint preservation.
+- metadata,
+- category hierarchy,
+- content similarity,
+- exploration,
+- delayed behavioral signal.
 
 ## What should the ranking objective be?
 
 Discuss the distinction between:
 
 ```text
-one-sided preference
-mutual opportunity
-activity
-conversation likelihood
+view likelihood
+cart likelihood
+transaction likelihood
+business value
 ```
 
 and the risks of proxy optimization.
 
-## How do you avoid repeatedly showing the same popular profiles?
+## How do you avoid showing only popular items?
 
 Discuss:
 
-- exposure concentration,
+- catalog exposure concentration,
 - reranking penalties,
 - coverage,
-- marketplace attention allocation.
+- long-tail tradeoffs.
 
 ## How do recommendations react quickly to new behavior?
 
 Discuss:
 
 - event streams,
-- online state,
+- session state,
+- online features,
 - cache invalidation,
-- asynchronous feature updates,
-- embedding refresh.
+- incremental candidate updates.
 
 ## What if the ranker is too slow?
 
 Discuss:
 
+- retrieval/ranking separation,
 - top-N reranking,
 - precomputation,
+- caching,
 - lightweight fallbacks,
-- candidate-source timeouts,
 - graceful degradation.
 
 ## How would you evaluate the system?
 
 Offline:
 
-- ranking quality,
-- reciprocal proxy where valid,
+- temporal ranking quality,
 - candidate recall,
+- funnel-specific metrics,
 - cohort behavior,
-- exposure,
+- catalog coverage,
+- availability correctness,
 - latency.
 
-Online:
+Online conceptually:
 
-- mutual matches,
-- conversations,
-- replies,
-- safety guardrails,
-- latency.
+- CTR,
+- cart rate,
+- conversion,
+- business metrics,
+- latency and reliability guardrails.
 
 ---
 
@@ -1437,24 +1327,12 @@ Online:
 
 Do not reduce the problem to:
 
-> **Who will user A like?**
+> **Which item will this visitor click?**
 
 The stronger system-design question is:
 
-> **How should a two-sided recommendation platform allocate limited attention when both participants have preferences, eligibility constraints, uncertain reciprocal opportunity, changing availability, and unequal exposure?**
+> **How should an e-commerce recommendation platform allocate limited attention across a changing catalog when user intent is uncertain, interaction signals vary in strength, product state changes over time, and serving resources are finite?**
 
 The guiding principle remains:
 
 > **Complexity must earn its place through evidence.**
-
-And the scientific order of operations should be:
-
-```text
-data semantics
-→ estimand
-→ evaluation design
-→ baseline
-→ measurable failure
-→ targeted intervention
-→ retain / reject
-```
