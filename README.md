@@ -129,7 +129,6 @@ CommerceRecLab/
 └── tests/
 ```
 
-Some package submodules still reflect the repository's earlier scaffold and will be migrated milestone-by-milestone as the Retailrocket implementation replaces the legacy audit path.
 
 ## Development
 

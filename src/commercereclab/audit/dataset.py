@@ -1,82 +1,96 @@
-"""Dataset and observation audit utilities for CommerceRecLab legacy v0.0.
+"""Retailrocket dataset and observation audit utilities for CommerceRecLab v0.0.
 
-The audit is intentionally descriptive. It reports what is present in an
-explicit-rating table without treating missing user-profile pairs as observed
-negatives or inferring an exposure process that is not recorded in the data.
+The audit is deliberately descriptive. Logged events are treated as observed
+visitor-item actions, not as a complete impression log. Missing visitor-item
+pairs are never interpreted as negative feedback.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
-import numpy as np
 import pandas as pd
 
+EXPECTED_FILES = (
+    "events.csv",
+    "item_properties_part1.csv",
+    "item_properties_part2.csv",
+    "category_tree.csv",
+)
+EXPECTED_EVENT_TYPES = ("view", "addtocart", "transaction")
+
 
 @dataclass(frozen=True)
-class ColumnAudit:
-    """Basic completeness information for one required column."""
-
+class FileAudit:
     name: str
-    dtype: str
-    null_count: int
-    null_fraction: float
-    unique_non_null: int
-
-
-@dataclass(frozen=True)
-class RatingAudit:
-    """Numeric rating diagnostics after coercion."""
-
-    numeric_count: int
-    non_numeric_non_null_count: int
-    minimum: float | None
-    maximum: float | None
-    mean: float | None
-    median: float | None
-    expected_min: float | None
-    expected_max: float | None
-    outside_expected_range_count: int | None
-
-
-@dataclass(frozen=True)
-class ReciprocalAudit:
-    """Directed-pair and reciprocal-pair diagnostics."""
-
-    unique_directed_pairs: int
-    duplicate_directed_pair_rows: int
-    self_pair_count: int
-    nonself_unique_directed_pairs: int
-    reciprocal_unordered_pairs: int
-    reciprocal_directed_pair_fraction: float
-    rows_on_reciprocal_pairs: int
-    rows_on_one_directional_pairs: int
-    reciprocal_subset_numeric_rating_mean: float | None
-    one_directional_subset_numeric_rating_mean: float | None
-    numeric_rating_mean_difference: float | None
-
-
-@dataclass(frozen=True)
-class DatasetAudit:
-    """Serializable v0.0 audit result."""
-
-    source_path: str
     row_count: int
-    required_columns: tuple[str, str, str]
-    columns: tuple[ColumnAudit, ...]
-    unique_users: int
-    unique_profiles: int
-    user_profile_id_overlap_count: int
-    user_id_overlap_fraction: float
-    profile_id_overlap_fraction: float
-    rating: RatingAudit
-    reciprocal: ReciprocalAudit
+    columns: tuple[str, ...]
+    null_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class EventAudit:
+    row_count: int
+    unique_visitors: int
+    unique_items: int
+    timestamp_min_ms: int | None
+    timestamp_max_ms: int | None
+    event_counts: dict[str, int]
+    unexpected_event_count: int
+    exact_duplicate_rows: int
+    transaction_rows: int
+    transaction_rows_with_id: int
+    nontransaction_rows_with_transaction_id: int
+
+
+@dataclass(frozen=True)
+class PropertyAudit:
+    row_count: int
+    unique_items: int
+    unique_properties: int
+    timestamp_min_ms: int | None
+    timestamp_max_ms: int | None
+    items_with_multiple_property_timestamps: int
+    category_property_rows: int
+    category_property_unique_items: int
+    available_property_rows: int
+    available_property_unique_items: int
+
+
+@dataclass(frozen=True)
+class CategoryTreeAudit:
+    row_count: int
+    unique_categories: int
+    root_categories: int
+    missing_parent_references: int
+    self_parent_rows: int
+    has_cycle: bool
+
+
+@dataclass(frozen=True)
+class CoverageAudit:
+    event_items_with_any_property: int
+    event_item_property_coverage: float
+    event_items_with_category_property: int
+    event_item_category_coverage: float
+    event_items_with_available_property: int
+    event_item_available_coverage: float
+
+
+@dataclass(frozen=True)
+class RetailrocketAudit:
+    source_dir: str
+    files: tuple[FileAudit, ...]
+    events: EventAudit
+    properties: PropertyAudit
+    category_tree: CategoryTreeAudit
+    coverage: CoverageAudit
     notes: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serializable representation."""
         return asdict(self)
 
 
@@ -84,178 +98,243 @@ def _safe_fraction(numerator: int, denominator: int) -> float:
     return float(numerator / denominator) if denominator else 0.0
 
 
-def _finite_stat(series: pd.Series, statistic: str) -> float | None:
-    if series.empty:
+def _int_or_none(value: Any) -> int | None:
+    if pd.isna(value):
         return None
-    value = getattr(series, statistic)()
-    if pd.isna(value) or not np.isfinite(value):
-        return None
-    return float(value)
+    return int(value)
 
 
-def audit_dataframe(
-    frame: pd.DataFrame,
-    *,
-    user_col: str,
-    profile_col: str,
-    rating_col: str,
-    source_path: str = "<dataframe>",
-    expected_rating_min: float | None = None,
-    expected_rating_max: float | None = None,
-) -> DatasetAudit:
-    """Audit one explicit-rating table.
-
-    Parameters are column names rather than dataset-specific assumptions so the
-    same audit can be run against any compatible explicit-rating extract. This
-    legacy path will be replaced by the Retailrocket-specific v0.0 audit. Reciprocal calculations use unique directed pairs; duplicate
-    rows are reported separately.
-    """
-
-    required = (user_col, profile_col, rating_col)
+def _require_columns(frame: pd.DataFrame, required: Iterable[str], filename: str) -> None:
     missing = [column for column in required if column not in frame.columns]
     if missing:
-        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+        raise ValueError(f"{filename}: missing required columns: {', '.join(missing)}")
 
-    columns = tuple(
-        ColumnAudit(
-            name=column,
-            dtype=str(frame[column].dtype),
-            null_count=int(frame[column].isna().sum()),
-            null_fraction=float(frame[column].isna().mean()) if len(frame) else 0.0,
-            unique_non_null=int(frame[column].nunique(dropna=True)),
-        )
-        for column in required
+
+def _read_events(path: Path) -> tuple[pd.DataFrame, FileAudit, EventAudit, set[int]]:
+    frame = pd.read_csv(path)
+    required = ("timestamp", "visitorid", "event", "itemid", "transactionid")
+    _require_columns(frame, required, path.name)
+
+    event_counts = Counter(frame["event"].dropna().astype(str))
+    unexpected = sum(
+        count for event, count in event_counts.items() if event not in EXPECTED_EVENT_TYPES
     )
+    transaction_mask = frame["event"].eq("transaction")
+    nontransaction_mask = frame["event"].notna() & ~transaction_mask
 
-    users = set(frame[user_col].dropna().unique().tolist())
-    profiles = set(frame[profile_col].dropna().unique().tolist())
-    overlap = users & profiles
-
-    rating_numeric = pd.to_numeric(frame[rating_col], errors="coerce")
-    numeric_non_null = rating_numeric.dropna()
-    non_numeric_non_null_count = int((frame[rating_col].notna() & rating_numeric.isna()).sum())
-
-    outside_range_count: int | None = None
-    if expected_rating_min is not None or expected_rating_max is not None:
-        outside = pd.Series(False, index=frame.index)
-        if expected_rating_min is not None:
-            outside |= rating_numeric < expected_rating_min
-        if expected_rating_max is not None:
-            outside |= rating_numeric > expected_rating_max
-        outside_range_count = int(outside.fillna(False).sum())
-
-    rating_audit = RatingAudit(
-        numeric_count=int(numeric_non_null.size),
-        non_numeric_non_null_count=non_numeric_non_null_count,
-        minimum=_finite_stat(numeric_non_null, "min"),
-        maximum=_finite_stat(numeric_non_null, "max"),
-        mean=_finite_stat(numeric_non_null, "mean"),
-        median=_finite_stat(numeric_non_null, "median"),
-        expected_min=expected_rating_min,
-        expected_max=expected_rating_max,
-        outside_expected_range_count=outside_range_count,
+    file_audit = FileAudit(
+        name=path.name,
+        row_count=int(len(frame)),
+        columns=tuple(frame.columns.astype(str)),
+        null_counts={column: int(frame[column].isna().sum()) for column in frame.columns},
     )
-
-    pair_rows = frame[[user_col, profile_col]].dropna()
-    duplicate_directed_pair_rows = int(pair_rows.duplicated(keep="first").sum())
-    unique_pairs = pair_rows.drop_duplicates()
-    unique_pair_tuples = set(unique_pairs.itertuples(index=False, name=None))
-
-    self_pairs = {(a, b) for a, b in unique_pair_tuples if a == b}
-    nonself_pairs = {(a, b) for a, b in unique_pair_tuples if a != b}
-    reciprocal_pairs = {
-        frozenset((a, b))
-        for a, b in nonself_pairs
-        if (b, a) in nonself_pairs
-    }
-    reciprocal_directed_pairs = {
-        pair
-        for pair in nonself_pairs
-        if (pair[1], pair[0]) in nonself_pairs
-    }
-
-    row_pair_tuples = list(pair_rows.itertuples(index=False, name=None))
-    reciprocal_row_mask = pd.Series(False, index=frame.index)
-    non_null_pair_indices = pair_rows.index
-    reciprocal_row_mask.loc[non_null_pair_indices] = [
-        pair in reciprocal_directed_pairs for pair in row_pair_tuples
-    ]
-    one_directional_mask = (
-        frame[user_col].notna()
-        & frame[profile_col].notna()
-        & ~reciprocal_row_mask
-        & (frame[user_col] != frame[profile_col])
-    )
-
-    reciprocal_ratings = rating_numeric[reciprocal_row_mask].dropna()
-    one_directional_ratings = rating_numeric[one_directional_mask].dropna()
-    reciprocal_mean = _finite_stat(reciprocal_ratings, "mean")
-    one_directional_mean = _finite_stat(one_directional_ratings, "mean")
-    mean_difference = (
-        reciprocal_mean - one_directional_mean
-        if reciprocal_mean is not None and one_directional_mean is not None
-        else None
-    )
-
-    reciprocal_audit = ReciprocalAudit(
-        unique_directed_pairs=len(unique_pair_tuples),
-        duplicate_directed_pair_rows=duplicate_directed_pair_rows,
-        self_pair_count=len(self_pairs),
-        nonself_unique_directed_pairs=len(nonself_pairs),
-        reciprocal_unordered_pairs=len(reciprocal_pairs),
-        reciprocal_directed_pair_fraction=_safe_fraction(
-            len(reciprocal_directed_pairs), len(nonself_pairs)
+    event_audit = EventAudit(
+        row_count=int(len(frame)),
+        unique_visitors=int(frame["visitorid"].nunique(dropna=True)),
+        unique_items=int(frame["itemid"].nunique(dropna=True)),
+        timestamp_min_ms=_int_or_none(frame["timestamp"].min()),
+        timestamp_max_ms=_int_or_none(frame["timestamp"].max()),
+        event_counts={str(key): int(value) for key, value in sorted(event_counts.items())},
+        unexpected_event_count=int(unexpected),
+        exact_duplicate_rows=int(frame.duplicated().sum()),
+        transaction_rows=int(transaction_mask.sum()),
+        transaction_rows_with_id=int((transaction_mask & frame["transactionid"].notna()).sum()),
+        nontransaction_rows_with_transaction_id=int(
+            (nontransaction_mask & frame["transactionid"].notna()).sum()
         ),
-        rows_on_reciprocal_pairs=int(reciprocal_row_mask.sum()),
-        rows_on_one_directional_pairs=int(one_directional_mask.sum()),
-        reciprocal_subset_numeric_rating_mean=reciprocal_mean,
-        one_directional_subset_numeric_rating_mean=one_directional_mean,
-        numeric_rating_mean_difference=mean_difference,
+    )
+    event_items = set(frame["itemid"].dropna().astype("int64").unique().tolist())
+    return frame, file_audit, event_audit, event_items
+
+
+def _audit_properties(
+    paths: tuple[Path, Path], *, chunksize: int
+) -> tuple[tuple[FileAudit, FileAudit], PropertyAudit, set[int], set[int], set[int]]:
+    total_rows = 0
+    timestamp_min: int | None = None
+    timestamp_max: int | None = None
+    property_names: set[str] = set()
+    property_items: set[int] = set()
+    category_items: set[int] = set()
+    available_items: set[int] = set()
+    category_rows = 0
+    available_rows = 0
+    global_item_min_ts = pd.Series(dtype="int64")
+    global_item_max_ts = pd.Series(dtype="int64")
+    file_audits: list[FileAudit] = []
+
+    for path in paths:
+        file_rows = 0
+        null_counts = Counter({"timestamp": 0, "itemid": 0, "property": 0, "value": 0})
+        columns: tuple[str, ...] | None = None
+
+        for chunk in pd.read_csv(path, chunksize=chunksize):
+            required = ("timestamp", "itemid", "property", "value")
+            _require_columns(chunk, required, path.name)
+            if columns is None:
+                columns = tuple(chunk.columns.astype(str))
+            file_rows += len(chunk)
+            total_rows += len(chunk)
+            for column in chunk.columns:
+                null_counts[column] += int(chunk[column].isna().sum())
+
+            ts_min = _int_or_none(chunk["timestamp"].min())
+            ts_max = _int_or_none(chunk["timestamp"].max())
+            if ts_min is not None:
+                timestamp_min = ts_min if timestamp_min is None else min(timestamp_min, ts_min)
+            if ts_max is not None:
+                timestamp_max = ts_max if timestamp_max is None else max(timestamp_max, ts_max)
+
+            property_names.update(chunk["property"].dropna().astype(str).unique().tolist())
+            valid = chunk[["itemid", "timestamp"]].dropna()
+            if not valid.empty:
+                grouped = valid.groupby("itemid", sort=False)["timestamp"].agg(["min", "max"])
+                grouped.index = grouped.index.astype("int64")
+                property_items.update(grouped.index.tolist())
+                chunk_min = grouped["min"].astype("int64")
+                chunk_max = grouped["max"].astype("int64")
+                global_item_min_ts = pd.concat([global_item_min_ts, chunk_min], axis=1).min(axis=1).astype("int64")
+                global_item_max_ts = pd.concat([global_item_max_ts, chunk_max], axis=1).max(axis=1).astype("int64")
+
+            category_mask = chunk["property"].eq("categoryid")
+            available_mask = chunk["property"].eq("available")
+            category_rows += int(category_mask.sum())
+            available_rows += int(available_mask.sum())
+            category_items.update(
+                chunk.loc[category_mask, "itemid"].dropna().astype("int64").unique().tolist()
+            )
+            available_items.update(
+                chunk.loc[available_mask, "itemid"].dropna().astype("int64").unique().tolist()
+            )
+
+        file_audits.append(
+            FileAudit(
+                name=path.name,
+                row_count=int(file_rows),
+                columns=columns or (),
+                null_counts={str(key): int(value) for key, value in sorted(null_counts.items())},
+            )
+        )
+
+    multiple_timestamps = int(
+        global_item_min_ts.ne(global_item_max_ts).sum()
+    )
+    audit = PropertyAudit(
+        row_count=int(total_rows),
+        unique_items=len(property_items),
+        unique_properties=len(property_names),
+        timestamp_min_ms=timestamp_min,
+        timestamp_max_ms=timestamp_max,
+        items_with_multiple_property_timestamps=int(multiple_timestamps),
+        category_property_rows=int(category_rows),
+        category_property_unique_items=len(category_items),
+        available_property_rows=int(available_rows),
+        available_property_unique_items=len(available_items),
+    )
+    return (
+        (file_audits[0], file_audits[1]),
+        audit,
+        property_items,
+        category_items,
+        available_items,
+    )
+
+
+def _has_category_cycle(parent_by_category: dict[int, int]) -> bool:
+    done: set[int] = set()
+    for start in parent_by_category:
+        if start in done:
+            continue
+        path: set[int] = set()
+        current = start
+        while current in parent_by_category:
+            if current in path:
+                return True
+            if current in done:
+                break
+            path.add(current)
+            current = parent_by_category[current]
+        done.update(path)
+    return False
+
+
+def _audit_category_tree(path: Path) -> tuple[FileAudit, CategoryTreeAudit]:
+    frame = pd.read_csv(path)
+    required = ("categoryid", "parentid")
+    _require_columns(frame, required, path.name)
+    category_ids = set(frame["categoryid"].dropna().astype("int64").tolist())
+    parent_ids = set(frame["parentid"].dropna().astype("int64").tolist())
+    missing_parents = parent_ids - category_ids
+    self_parent_mask = frame["categoryid"].eq(frame["parentid"]) & frame["parentid"].notna()
+    parent_by_category = {
+        int(category): int(parent)
+        for category, parent in frame[["categoryid", "parentid"]].dropna().itertuples(index=False)
+    }
+
+    file_audit = FileAudit(
+        name=path.name,
+        row_count=int(len(frame)),
+        columns=tuple(frame.columns.astype(str)),
+        null_counts={column: int(frame[column].isna().sum()) for column in frame.columns},
+    )
+    audit = CategoryTreeAudit(
+        row_count=int(len(frame)),
+        unique_categories=len(category_ids),
+        root_categories=int(frame["parentid"].isna().sum()),
+        missing_parent_references=len(missing_parents),
+        self_parent_rows=int(self_parent_mask.sum()),
+        has_cycle=_has_category_cycle(parent_by_category),
+    )
+    return file_audit, audit
+
+
+def audit_retailrocket_dir(
+    source_dir: str | Path, *, property_chunksize: int = 500_000
+) -> RetailrocketAudit:
+    """Audit the canonical four-file Retailrocket release.
+
+    Item-property tables are streamed in chunks so the full ~20M-row metadata
+    history can be audited on a laptop without loading it all into memory.
+    """
+
+    source = Path(source_dir)
+    missing = [name for name in EXPECTED_FILES if not (source / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Missing Retailrocket files: {', '.join(missing)}")
+    if property_chunksize <= 0:
+        raise ValueError("property_chunksize must be positive")
+
+    _, events_file, events, event_items = _read_events(source / "events.csv")
+    property_files, properties, property_items, category_items, available_items = _audit_properties(
+        (source / "item_properties_part1.csv", source / "item_properties_part2.csv"),
+        chunksize=property_chunksize,
+    )
+    category_file, category_tree = _audit_category_tree(source / "category_tree.csv")
+
+    coverage = CoverageAudit(
+        event_items_with_any_property=len(event_items & property_items),
+        event_item_property_coverage=_safe_fraction(len(event_items & property_items), len(event_items)),
+        event_items_with_category_property=len(event_items & category_items),
+        event_item_category_coverage=_safe_fraction(len(event_items & category_items), len(event_items)),
+        event_items_with_available_property=len(event_items & available_items),
+        event_item_available_coverage=_safe_fraction(len(event_items & available_items), len(event_items)),
     )
 
     notes = (
-        "An unobserved user-profile pair is missing data, not an observed dislike/pass.",
-        "ID overlap is reported descriptively and does not by itself prove shared identity semantics.",
-        "Reciprocal counts are based on observed directed pairs and do not imply match outcomes.",
-        "Reciprocal-vs-one-directional rating differences are descriptive, not causal or inferential.",
+        "A logged event is an observed visitor-item action, not proof of a recommendation impression.",
+        "An absent visitor-item event is missing/unobserved behavior, not an observed negative preference.",
+        "Event timestamps support temporal splits; random interaction splits should not be used for deployment-style claims.",
+        "Item properties are time-varying. Downstream joins must use only property state available at or before the event time.",
+        "Hashed property/value identifiers should be treated as opaque unless the dataset documentation gives semantic meaning.",
+        "Transaction IDs are outcome identifiers, not product/user features and must not leak into pre-transaction ranking features.",
     )
 
-    return DatasetAudit(
-        source_path=source_path,
-        row_count=int(len(frame)),
-        required_columns=required,
-        columns=columns,
-        unique_users=len(users),
-        unique_profiles=len(profiles),
-        user_profile_id_overlap_count=len(overlap),
-        user_id_overlap_fraction=_safe_fraction(len(overlap), len(users)),
-        profile_id_overlap_fraction=_safe_fraction(len(overlap), len(profiles)),
-        rating=rating_audit,
-        reciprocal=reciprocal_audit,
+    return RetailrocketAudit(
+        source_dir=str(source),
+        files=(events_file, *property_files, category_file),
+        events=events,
+        properties=properties,
+        category_tree=category_tree,
+        coverage=coverage,
         notes=notes,
-    )
-
-
-def audit_csv(
-    path: str | Path,
-    *,
-    user_col: str,
-    profile_col: str,
-    rating_col: str,
-    delimiter: str = ",",
-    expected_rating_min: float | None = None,
-    expected_rating_max: float | None = None,
-) -> DatasetAudit:
-    """Load a delimited rating table and run :func:`audit_dataframe`."""
-
-    source = Path(path)
-    frame = pd.read_csv(source, sep=delimiter)
-    return audit_dataframe(
-        frame,
-        user_col=user_col,
-        profile_col=profile_col,
-        rating_col=rating_col,
-        source_path=str(source),
-        expected_rating_min=expected_rating_min,
-        expected_rating_max=expected_rating_max,
     )

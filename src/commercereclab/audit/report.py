@@ -1,107 +1,112 @@
-"""Rendering helpers for CommerceRecLab legacy v0.0 dataset audits."""
+"""Rendering helpers for the CommerceRecLab Retailrocket v0.0 audit."""
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
-from commercereclab.audit.dataset import DatasetAudit
+from commercereclab.audit.dataset import RetailrocketAudit
 
 
-def _display(value: object) -> str:
+def _timestamp(value: int | None) -> str:
     if value is None:
         return "n/a"
-    if isinstance(value, float):
-        return f"{value:.6g}"
-    return str(value)
+    return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
 
 
-def render_markdown(audit: DatasetAudit) -> str:
+def render_markdown(audit: RetailrocketAudit) -> str:
     """Render a compact human-readable audit report."""
 
-    column_rows = "\n".join(
-        f"| `{column.name}` | `{column.dtype}` | {column.null_count} | "
-        f"{column.null_fraction:.4f} | {column.unique_non_null} |"
-        for column in audit.columns
+    file_rows = "\n".join(
+        f"| `{file.name}` | {file.row_count:,} | `{', '.join(file.columns)}` |"
+        for file in audit.files
     )
-    r = audit.reciprocal
-    rating = audit.rating
+    event_rows = "\n".join(
+        f"| `{event}` | {count:,} | {count / audit.events.row_count:.4%} |"
+        for event, count in audit.events.event_counts.items()
+    )
+    e = audit.events
+    p = audit.properties
+    c = audit.category_tree
+    v = audit.coverage
 
-    return f"""# CommerceRecLab legacy v0.0 — Dataset + Observation Audit
+    return f"""# CommerceRecLab v0.0 — Retailrocket Dataset + Observation Audit
 
-Source: `{audit.source_path}`
+Source directory: `{audit.source_dir}`
 
 ## Observation contract
 
-This audit treats each non-null `(user, profile, rating)` record as an observed directed rating.
-An unobserved user-profile pair is **not** interpreted as an observed dislike, pass, or exposure.
+Each event is treated as a logged visitor-item action. The dataset is **not** assumed to contain a complete recommendation-impression log. An absent visitor-item pair is therefore not interpreted as a negative label.
 
-## Dataset shape
+## Files
 
-- Rows: **{audit.row_count}**
-- Unique rating users: **{audit.unique_users}**
-- Unique rated profiles: **{audit.unique_profiles}**
+| File | rows | columns |
+|---|---:|---|
+{file_rows}
 
-| Column | dtype | nulls | null fraction | unique non-null |
-|---|---:|---:|---:|---:|
-{column_rows}
+## Event log
 
-## ID-space overlap
+- Rows: **{e.row_count:,}**
+- Unique visitors: **{e.unique_visitors:,}**
+- Unique event items: **{e.unique_items:,}**
+- Timestamp range: **{_timestamp(e.timestamp_min_ms)} → {_timestamp(e.timestamp_max_ms)}**
+- Exact duplicate rows beyond first occurrence: **{e.exact_duplicate_rows:,}**
+- Unexpected event-type rows: **{e.unexpected_event_count:,}**
 
-- IDs appearing as both user and profile: **{audit.user_profile_id_overlap_count}**
-- Fraction of user IDs also seen as profile IDs: **{audit.user_id_overlap_fraction:.4f}**
-- Fraction of profile IDs also seen as user IDs: **{audit.profile_id_overlap_fraction:.4f}**
+| event | rows | fraction |
+|---|---:|---:|
+{event_rows}
 
-These values are descriptive. Numeric/string overlap alone does not establish that the two columns share a guaranteed identity namespace.
+### Transaction-field consistency
 
-## Rating diagnostics
+- Transaction events: **{e.transaction_rows:,}**
+- Transaction events with a transaction ID: **{e.transaction_rows_with_id:,}**
+- Non-transaction events carrying a transaction ID: **{e.nontransaction_rows_with_transaction_id:,}**
 
-- Numeric ratings: **{rating.numeric_count}**
-- Non-numeric, non-null ratings: **{rating.non_numeric_non_null_count}**
-- Minimum: **{_display(rating.minimum)}**
-- Maximum: **{_display(rating.maximum)}**
-- Mean: **{_display(rating.mean)}**
-- Median: **{_display(rating.median)}**
-- Expected range: **{_display(rating.expected_min)} to {_display(rating.expected_max)}**
-- Numeric ratings outside expected range: **{_display(rating.outside_expected_range_count)}**
+## Time-varying item properties
 
-## Directed-pair diagnostics
+- Property rows across both parts: **{p.row_count:,}**
+- Unique property-bearing items: **{p.unique_items:,}**
+- Unique property identifiers: **{p.unique_properties:,}**
+- Property timestamp range: **{_timestamp(p.timestamp_min_ms)} → {_timestamp(p.timestamp_max_ms)}**
+- Items observed at more than one property timestamp: **{p.items_with_multiple_property_timestamps:,}**
+- `categoryid` rows / unique items: **{p.category_property_rows:,} / {p.category_property_unique_items:,}**
+- `available` rows / unique items: **{p.available_property_rows:,} / {p.available_property_unique_items:,}**
 
-- Unique directed pairs: **{r.unique_directed_pairs}**
-- Duplicate directed-pair rows beyond first occurrence: **{r.duplicate_directed_pair_rows}**
-- Unique self-pairs: **{r.self_pair_count}**
-- Non-self unique directed pairs: **{r.nonself_unique_directed_pairs}**
+The presence of repeated item-property snapshots means downstream features must use point-in-time joins rather than future/latest metadata.
 
-## Reciprocal-pair diagnostics
+## Event-item metadata coverage
 
-- Reciprocal unordered pairs: **{r.reciprocal_unordered_pairs}**
-- Fraction of non-self directed pairs with an observed reverse direction: **{r.reciprocal_directed_pair_fraction:.4f}**
-- Rows belonging to reciprocal pairs: **{r.rows_on_reciprocal_pairs}**
-- Rows belonging to one-directional non-self pairs: **{r.rows_on_one_directional_pairs}**
-- Mean numeric rating on reciprocal-pair rows: **{_display(r.reciprocal_subset_numeric_rating_mean)}**
-- Mean numeric rating on one-directional rows: **{_display(r.one_directional_subset_numeric_rating_mean)}**
-- Descriptive mean difference (reciprocal − one-directional): **{_display(r.numeric_rating_mean_difference)}**
+- Any property history: **{v.event_items_with_any_property:,} / {e.unique_items:,} ({v.event_item_property_coverage:.4%})**
+- `categoryid`: **{v.event_items_with_category_property:,} / {e.unique_items:,} ({v.event_item_category_coverage:.4%})**
+- `available`: **{v.event_items_with_available_property:,} / {e.unique_items:,} ({v.event_item_available_coverage:.4%})**
+
+## Category tree integrity
+
+- Rows: **{c.row_count:,}**
+- Unique categories: **{c.unique_categories:,}**
+- Root categories: **{c.root_categories:,}**
+- Referenced parents missing from the table: **{c.missing_parent_references:,}**
+- Self-parent rows: **{c.self_parent_rows:,}**
+- Cycle detected: **{c.has_cycle}**
 
 ## Scientific interpretation
 
-- Reciprocal-pair availability can justify later analysis of **observed bidirectional expressed preference** if identity semantics are independently validated.
-- These records do not establish impressions, passes, matches, conversations, replies, or relationship outcomes.
-- The reciprocal-subset comparison above is descriptive only; selection into that subset may be non-random.
+This release supports empirical work on observed behavioral sequences, temporal recommendation, conversion-funnel outcomes, item-state features, candidate generation, and catalog coverage. It does **not** by itself identify which products were recommended but ignored, so non-events must not be called observed dislikes or passes.
 
 ## Audit notes
 
 """ + "\n".join(f"- {note}" for note in audit.notes) + "\n"
 
 
-def write_reports(audit: DatasetAudit, output_dir: str | Path) -> tuple[Path, Path]:
+def write_reports(audit: RetailrocketAudit, output_dir: str | Path) -> tuple[Path, Path]:
     """Write machine-readable JSON and human-readable Markdown reports."""
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-
     json_path = output / "audit.json"
     markdown_path = output / "audit.md"
-
     json_path.write_text(json.dumps(audit.to_dict(), indent=2) + "\n", encoding="utf-8")
     markdown_path.write_text(render_markdown(audit), encoding="utf-8")
     return json_path, markdown_path

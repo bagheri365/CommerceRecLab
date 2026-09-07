@@ -1,12 +1,11 @@
-"""Dataset and observation auditing for CommerceRecLab."""
+"""Retailrocket dataset and observation auditing for CommerceRecLab."""
 
-from commercereclab.audit.dataset import DatasetAudit, audit_csv, audit_dataframe
+from commercereclab.audit.dataset import RetailrocketAudit, audit_retailrocket_dir
 from commercereclab.audit.report import render_markdown, write_reports
 
 __all__ = [
-    "DatasetAudit",
-    "audit_csv",
-    "audit_dataframe",
+    "RetailrocketAudit",
+    "audit_retailrocket_dir",
     "render_markdown",
     "write_reports",
 ]

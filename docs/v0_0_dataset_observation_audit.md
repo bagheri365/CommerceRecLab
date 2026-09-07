@@ -1,51 +1,57 @@
-# v0.0 — Dataset + Observation Audit
+# v0.0 — Retailrocket Dataset + Observation Audit
 
 ## Goal
 
-Before fitting a recommender, establish what the rating table actually contains and what claims it can support.
+Before fitting a recommender, establish what the Retailrocket release actually contains, whether the four files are internally coherent, and which evaluation claims are scientifically supportable.
 
-The v0.0 audit is deliberately descriptive. It does **not** infer that an unrated user-profile pair was shown and rejected, and it does not treat observed bidirectional ratings as match outcomes.
+The audit is deliberately descriptive. It does not manufacture negative feedback from missing visitor-item pairs and it does not treat an observed event as proof that the item was recommended by a particular ranking system.
 
 ## Questions answered
 
-1. Are the required user, profile, and rating columns present?
-2. How many rows, users, profiles, missing values, and duplicate directed pairs exist?
-3. Are ratings numeric, and do they respect an explicitly supplied expected range?
-4. How much literal ID overlap exists between the user and profile columns?
-5. How many observed non-self directed pairs have an observed reverse direction?
-6. How different is the reciprocal subset from the one-directional subset at a basic descriptive level?
+1. Are all four canonical files present with the expected columns?
+2. How many event rows, visitors, items, and event types exist?
+3. What is the observed timestamp range?
+4. Are duplicate or unexpected event records present?
+5. Are transaction IDs consistent with transaction events?
+6. How large is the time-varying item-property history?
+7. How many event items have property, category, and availability history?
+8. Do item properties change over time, requiring point-in-time joins?
+9. Is the category tree structurally coherent (roots, parent references, self-links, cycles)?
+
+## Local data layout
+
+Keep the downloaded dataset outside Git tracking:
+
+```text
+data/
+└── raw/
+    └── retailrocket/
+        ├── events.csv
+        ├── item_properties_part1.csv
+        ├── item_properties_part2.csv
+        └── category_tree.csv
+```
+
+`data/raw/` is ignored by the repository.
 
 ## Run the audit
 
-Install the package in development mode first:
+From the repository root:
 
 ```bash
-python -m pip install -e ".[dev]"
-```
-
-Then run:
-
-```bash
-python -m commercereclab.audit path/to/ratings.csv \
-  --user-col UserID \
-  --profile-col ProfileID \
-  --rating-col Rating \
-  --expected-rating-min 1 \
-  --expected-rating-max 10 \
+python -m commercereclab.audit data/raw/retailrocket \
   --output-dir artifacts/v0_0_dataset_audit
 ```
 
-For tab-delimited input, add:
+The item-property tables contain tens of millions of rows, so the audit streams them in chunks. The default is 500,000 rows per chunk; it can be changed if needed:
 
 ```bash
---delimiter tab
+python -m commercereclab.audit data/raw/retailrocket \
+  --property-chunksize 250000 \
+  --output-dir artifacts/v0_0_dataset_audit
 ```
 
-The expected rating range is intentionally explicit rather than hard-coded. Omit the range flags if the local extract has not yet been verified.
-
 ## Outputs
-
-The command writes:
 
 ```text
 artifacts/v0_0_dataset_audit/
@@ -53,47 +59,40 @@ artifacts/v0_0_dataset_audit/
 └── audit.md
 ```
 
-`audit.json` is intended for reproducible downstream checks. `audit.md` is the human-readable milestone artifact.
+`audit.json` is machine-readable. `audit.md` is the human-readable milestone artifact.
 
-## Reciprocal-pair definition
+## Observation rules
 
-For distinct IDs `A` and `B`, a reciprocal observed pair exists only when both directed pairs occur:
+Use language such as:
 
-```text
-A → B
-B → A
-```
+- "visitor A generated a logged view event for item B";
+- "item B was added to cart";
+- "a transaction event was observed";
+- "no logged interaction is present for this visitor-item pair."
 
-Counts are computed from **unique directed pairs**. Duplicate rows are reported separately, and self-pairs such as `A → A` are never counted as reciprocal pairs.
+Do not silently replace the last statement with:
 
-This audit establishes only that both directed ratings are present. Before using those pairs as observations about the same real participants, independently validate the dataset's identity semantics.
+- "the visitor disliked the item";
+- "the visitor passed on the item";
+- "the visitor saw the recommendation and ignored it."
 
-## Interpretation rules
+Those require an impression/exposure mechanism that this release does not directly identify.
 
-Use conclusions such as:
+## Temporal leakage rule
 
-- "The table contains N observed directed rating pairs."
-- "X% of unique non-self directed pairs have an observed reverse direction."
-- "The user and profile ID columns have Y literal IDs in common."
+Every downstream experiment using item properties must use point-in-time state. For an event at time `t`, a property value must come from a timestamp `<= t`.
 
-Do not conclude from v0.0 alone:
-
-- that every missing pair was exposed;
-- that missing means dislike/pass;
-- that numeric ID overlap proves a guaranteed shared identity namespace;
-- that a bidirectional rating pair is a match;
-- that reciprocal-subset differences are causal.
+This rule applies to category, availability, and every opaque property used as a feature.
 
 ## Exit criteria
 
 v0.0 is complete when:
 
-1. the raw/local dataset can be audited deterministically;
-2. schema and rating-range anomalies are documented;
-3. duplicate/self-pair behavior is understood;
-4. ID-space overlap is quantified;
-5. reciprocal coverage is quantified;
-6. the generated `audit.md` is committed or its key findings are summarized in an experiment record;
-7. any claim about real reciprocal identity is supported by dataset documentation rather than inferred from numeric overlap alone.
-
-Only then move to evaluation semantics and preference baselines.
+1. the canonical Retailrocket files pass schema inspection;
+2. event type/count and time-range statistics are recorded;
+3. transaction-field consistency is checked;
+4. event-item metadata coverage is quantified;
+5. time-varying property behavior is quantified;
+6. category-tree integrity is checked;
+7. observation and temporal-leakage semantics are documented;
+8. the generated report has been reviewed before moving to v0.1 evaluation protocol and baselines.

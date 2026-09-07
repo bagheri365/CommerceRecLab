@@ -1,147 +1,102 @@
-# Data and Evaluation Semantics
+# Data Semantics
 
-This document defines the minimum scientific contract for empirical experiments in CommerceRecLab.
+CommerceRecLab uses the Retailrocket e-commerce dataset as its primary empirical source.
 
-## 1. Observation unit
+## Raw empirical objects
 
-For an observed directed record:
-
-```text
-A → B = r
-```
-
-`A` is the rating user, `B` is the rated profile, and `r` is the observed explicit rating.
-
-An unobserved pair means only that no rating is available in the dataset. It must not automatically be interpreted as an observed dislike, pass, impression without engagement, or negative preference.
-
-## 2. Exposure limitation
-
-The public rating data do not constitute a complete impression log. Unless additional evidence establishes the exposure process, CommerceRecLab does not assume that every unobserved profile was presented to the user.
-
-Therefore every ranking experiment must define its candidate universe explicitly.
-
-## 3. Empirical estimands
-
-### Explicit-rating prediction
-
-Given an observed pair whose rating is held out, predict the numerical rating.
-
-Suitable metrics may include RMSE and MAE.
-
-### Ranking on a defined candidate set
-
-Given a user and an explicitly defined evaluation candidate set, rank candidates according to a stated relevance rule.
-
-The report must document:
-
-- candidate-set construction;
-- positive/relevance construction;
-- comparison or negative construction;
-- whether the task ranks only held-out rated profiles or attempts a broader retrieval proxy.
-
-Ranking only among held-out rated profiles must not be described as retrieval over the full unseen population.
-
-## 4. Relevance construction
-
-If ratings are transformed into binary or graded relevance, the transformation is part of the experimental specification.
-
-Possible controlled alternatives include:
+The release contains four canonical files:
 
 ```text
-fixed threshold
-user-relative threshold
-graded relevance
+events.csv
+item_properties_part1.csv
+item_properties_part2.csv
+category_tree.csv
 ```
 
-A user-relative threshold must be estimated from that user's **training history only**. Validation/test ratings must not influence the threshold used to evaluate them.
+### Event log
 
-Sensitivity to the chosen relevance construction should be reported when conclusions materially depend on it.
-
-## 5. Split regimes
-
-### Warm-start
-
-Users appear during training and evaluation, but evaluation observations are held out.
-
-### Sparse-history
-
-Only a controlled number of training observations are retained for an evaluated user.
-
-### New-user cold start
-
-The evaluated user's behavioral history is excluded from behavioral model fitting. Any profile-derived prior must rely only on features legitimately available at recommendation time.
-
-If such profile features are synthetic or derived, that experiment belongs to the controlled system-design layer.
-
-## 6. Reciprocal tasks
-
-Two reciprocal estimands are scientifically distinct.
-
-### Prospective reciprocal prediction
-
-Predict both directions for a pair when neither directional rating is available to the model.
-
-For test pair `{A, B}`, exclude both:
+`events.csv` contains timestamped visitor-item actions:
 
 ```text
-A → B
-B → A
+timestamp, visitorid, event, itemid, transactionid
 ```
 
-from training information used for that prediction.
-
-### Conditional reciprocation
-
-Estimate one direction given that the opposite direction is already observed. Here the observed opposite direction is part of the task definition, not leakage.
-
-Reports must name which estimand is being evaluated.
-
-## 7. Reciprocal score semantics
-
-For:
+The observed event types are expected to be:
 
 ```text
-a = score(A → B)
-b = score(B → A)
+view
+addtocart
+transaction
 ```
 
-product, minimum, harmonic mean, or weighted combinations are score-fusion heuristics when `a` and `b` are arbitrary scores.
+An event means that the corresponding action was logged. It does **not** imply that every item without an event was shown to the visitor and rejected.
 
-A model output may be written as `P(A prefers B)` only when the target event is precisely defined and probabilistic calibration has been evaluated on held-out data. Appropriate diagnostics may include reliability plots, Brier score, expected calibration error, or another justified calibration measure.
+Therefore:
 
-Even calibrated directional probabilities do not make their product an automatically valid estimate of mutual preference. Any probabilistic combination must state the dependence assumptions or be presented as a reciprocal proxy.
+```text
+no event for (visitor, item) != observed negative preference
+```
 
-## 8. Leakage rules
+The dataset should not be described as a complete recommendation-impression log unless an additional source establishes that fact.
 
-At minimum, prohibit:
+### Transaction IDs
 
-- fitting preprocessing statistics on validation/test targets;
-- computing user-relative relevance thresholds from validation/test ratings;
-- allowing held-out reciprocal directions into a prospective reciprocal prediction;
-- using future information in a temporal experiment;
-- training on behavioral history for a user labeled as zero-history cold start;
-- tuning intervention thresholds on the final test set.
+`transactionid` identifies observed transaction outcomes. It is not an input feature available before the purchase and must not leak into ranking or candidate-generation features intended to predict a future transaction.
 
-## 9. Statistical unit
+## Item properties
 
-The resampling unit should follow the estimand. Depending on the experiment, this may be a rating, user, unordered pair, market, or simulation seed/scenario.
+The two `item_properties_part*.csv` files contain timestamped item state:
 
-Confidence intervals should not treat strongly dependent observations as independent merely to increase the nominal sample size.
+```text
+timestamp, itemid, property, value
+```
 
-## 10. Claim discipline
+Item properties are time-varying. A feature for an event at time `t` may use only item state observed at or before `t`.
 
-Use language such as:
+Correct conceptual join:
 
-- observed rating prediction;
-- ranking quality on the defined candidate set;
-- mutual expressed-preference proxy;
-- controlled simulation result;
-- controlled single-node ANN scaling.
+```text
+item state = latest known state with property_timestamp <= event_timestamp
+```
 
-Do not infer from the public dataset alone:
+Incorrect conceptual join:
 
-- real match probability;
-- conversation or reply probability;
-- relationship outcomes;
-- production marketplace behavior not recorded in the source data;
-- causal effects of a recommendation policy.
+```text
+item state = latest state anywhere in the full dataset
+```
+
+The latter can leak future information.
+
+Many property/value identifiers are opaque or hashed. Do not assign business semantics to them unless the dataset documentation explicitly provides those semantics.
+
+## Category hierarchy
+
+`category_tree.csv` contains:
+
+```text
+categoryid, parentid
+```
+
+It defines the category hierarchy used by item `categoryid` property records. Root categories have no parent.
+
+## Valid empirical claims
+
+The data can support experiments about:
+
+- observed visitor-item behavioral sequences;
+- view/add-to-cart/transaction outcomes;
+- temporal recommendation and session intent;
+- item metadata/state available at a given time;
+- category-aware retrieval/ranking;
+- catalog coverage and popularity concentration;
+- candidate-generation and serving experiments built on the observed corpus.
+
+## Claims the raw data do not establish
+
+Without additional evidence, do not claim the dataset directly records:
+
+- every recommendation impression;
+- every product a visitor considered and rejected;
+- causal effects of recommendations;
+- complete inventory state outside the provided `available` property history;
+- semantic meaning for opaque property hashes.

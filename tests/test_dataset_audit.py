@@ -9,97 +9,120 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from commercereclab.audit.dataset import audit_dataframe
+from commercereclab.audit.dataset import audit_retailrocket_dir
 from commercereclab.audit.report import render_markdown, write_reports
 
 
-def sample_frame() -> pd.DataFrame:
-    return pd.DataFrame(
+def write_fixture(root: Path) -> Path:
+    data = root / "retailrocket"
+    data.mkdir()
+
+    pd.DataFrame(
         {
-            "user_id": [1, 2, 1, 3, 4, 4, 5, None],
-            "profile_id": [2, 1, 3, 1, 4, 4, 6, 2],
-            "rating": [9, 8, 5, 7, 10, 10, "bad", 6],
+            "timestamp": [1000, 2000, 3000, 4000, 4000],
+            "visitorid": [1, 1, 2, 2, 2],
+            "event": ["view", "addtocart", "view", "transaction", "transaction"],
+            "itemid": [10, 10, 20, 20, 20],
+            "transactionid": [None, None, None, 99, 99],
         }
-    )
+    ).to_csv(data / "events.csv", index=False)
+
+    pd.DataFrame(
+        {
+            "timestamp": [500, 1500, 500, 500],
+            "itemid": [10, 10, 20, 30],
+            "property": ["categoryid", "available", "categoryid", "available"],
+            "value": ["1", "1", "2", "1"],
+        }
+    ).to_csv(data / "item_properties_part1.csv", index=False)
+    pd.DataFrame(
+        {
+            "timestamp": [2500, 3500, 3500],
+            "itemid": [10, 20, 20],
+            "property": ["available", "available", "colorhash"],
+            "value": ["0", "1", "abc"],
+        }
+    ).to_csv(data / "item_properties_part2.csv", index=False)
+    pd.DataFrame(
+        {
+            "categoryid": [1, 2, 3],
+            "parentid": [None, 1, 1],
+        }
+    ).to_csv(data / "category_tree.csv", index=False)
+    return data
 
 
-def test_audit_reconstructs_reciprocal_pairs_without_counting_self_pair() -> None:
-    audit = audit_dataframe(
-        sample_frame(),
-        user_col="user_id",
-        profile_col="profile_id",
-        rating_col="rating",
-        expected_rating_min=1,
-        expected_rating_max=10,
-    )
+def test_retailrocket_audit_counts_events_properties_and_coverage(tmp_path: Path) -> None:
+    source = write_fixture(tmp_path)
+    audit = audit_retailrocket_dir(source, property_chunksize=2)
 
-    reciprocal = audit.reciprocal
-    assert audit.row_count == 8
-    assert audit.unique_users == 5
-    assert audit.unique_profiles == 5
-    assert audit.user_profile_id_overlap_count == 4
-    assert reciprocal.unique_directed_pairs == 6
-    assert reciprocal.duplicate_directed_pair_rows == 1
-    assert reciprocal.self_pair_count == 1
-    assert reciprocal.nonself_unique_directed_pairs == 5
-    assert reciprocal.reciprocal_unordered_pairs == 2
-    assert reciprocal.reciprocal_directed_pair_fraction == pytest.approx(4 / 5)
-    assert reciprocal.rows_on_reciprocal_pairs == 4
-    assert reciprocal.rows_on_one_directional_pairs == 1
+    assert audit.events.row_count == 5
+    assert audit.events.unique_visitors == 2
+    assert audit.events.unique_items == 2
+    assert audit.events.event_counts == {"addtocart": 1, "transaction": 2, "view": 2}
+    assert audit.events.exact_duplicate_rows == 1
+    assert audit.events.transaction_rows == 2
+    assert audit.events.transaction_rows_with_id == 2
+    assert audit.events.nontransaction_rows_with_transaction_id == 0
 
+    assert audit.properties.row_count == 7
+    assert audit.properties.unique_items == 3
+    assert audit.properties.unique_properties == 3
+    assert audit.properties.items_with_multiple_property_timestamps == 2
+    assert audit.properties.category_property_unique_items == 2
+    assert audit.properties.available_property_unique_items == 3
 
-def test_audit_reports_non_numeric_ratings_and_expected_range() -> None:
-    frame = sample_frame().copy()
-    frame.loc[len(frame)] = [6, 7, 11]
-
-    audit = audit_dataframe(
-        frame,
-        user_col="user_id",
-        profile_col="profile_id",
-        rating_col="rating",
-        expected_rating_min=1,
-        expected_rating_max=10,
-    )
-
-    assert audit.rating.non_numeric_non_null_count == 1
-    assert audit.rating.outside_expected_range_count == 1
-    assert audit.rating.minimum == 5.0
-    assert audit.rating.maximum == 11.0
+    assert audit.coverage.event_item_property_coverage == pytest.approx(1.0)
+    assert audit.coverage.event_item_category_coverage == pytest.approx(1.0)
+    assert audit.coverage.event_item_available_coverage == pytest.approx(1.0)
 
 
-def test_missing_required_column_fails_clearly() -> None:
-    with pytest.raises(ValueError, match="Missing required columns: rating"):
-        audit_dataframe(
-            pd.DataFrame({"user_id": [1], "profile_id": [2]}),
-            user_col="user_id",
-            profile_col="profile_id",
-            rating_col="rating",
-        )
+def test_category_tree_integrity_is_reported(tmp_path: Path) -> None:
+    source = write_fixture(tmp_path)
+    audit = audit_retailrocket_dir(source)
+
+    assert audit.category_tree.unique_categories == 3
+    assert audit.category_tree.root_categories == 1
+    assert audit.category_tree.missing_parent_references == 0
+    assert audit.category_tree.self_parent_rows == 0
+    assert audit.category_tree.has_cycle is False
 
 
-def test_reports_are_written_as_json_and_markdown(tmp_path) -> None:
-    audit = audit_dataframe(
-        sample_frame(),
-        user_col="user_id",
-        profile_col="profile_id",
-        rating_col="rating",
-    )
+def test_missing_file_fails_clearly(tmp_path: Path) -> None:
+    source = write_fixture(tmp_path)
+    (source / "category_tree.csv").unlink()
 
-    json_path, markdown_path = write_reports(audit, tmp_path)
+    with pytest.raises(FileNotFoundError, match="category_tree.csv"):
+        audit_retailrocket_dir(source)
+
+
+def test_bad_schema_fails_clearly(tmp_path: Path) -> None:
+    source = write_fixture(tmp_path)
+    pd.DataFrame({"timestamp": [1], "visitorid": [1]}).to_csv(source / "events.csv", index=False)
+
+    with pytest.raises(ValueError, match="events.csv: missing required columns"):
+        audit_retailrocket_dir(source)
+
+
+def test_reports_are_written_as_json_and_markdown(tmp_path: Path) -> None:
+    source = write_fixture(tmp_path)
+    audit = audit_retailrocket_dir(source)
+
+    output = tmp_path / "out"
+    json_path, markdown_path = write_reports(audit, output)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     markdown = markdown_path.read_text(encoding="utf-8")
 
-    assert payload["reciprocal"]["reciprocal_unordered_pairs"] == 2
-    assert "unobserved user-profile pair" in markdown.lower()
-    assert "descriptive only" in markdown.lower()
+    assert payload["events"]["unique_visitors"] == 2
+    assert payload["properties"]["row_count"] == 7
+    assert "point-in-time" in markdown.lower()
+    assert "not interpreted as a negative" in markdown.lower()
     assert render_markdown(audit) == markdown
 
 
-def test_cli_writes_reports(tmp_path) -> None:
-    data_path = tmp_path / "ratings.csv"
-    output_dir = tmp_path / "audit-output"
-    sample_frame().to_csv(data_path, index=False)
-
+def test_cli_writes_reports(tmp_path: Path) -> None:
+    source = write_fixture(tmp_path)
+    output = tmp_path / "cli-output"
     env = os.environ.copy()
     repo_src = Path(__file__).resolve().parents[1] / "src"
     env["PYTHONPATH"] = str(repo_src)
@@ -109,19 +132,11 @@ def test_cli_writes_reports(tmp_path) -> None:
             sys.executable,
             "-m",
             "commercereclab.audit",
-            str(data_path),
-            "--user-col",
-            "user_id",
-            "--profile-col",
-            "profile_id",
-            "--rating-col",
-            "rating",
-            "--expected-rating-min",
-            "1",
-            "--expected-rating-max",
-            "10",
+            str(source),
+            "--property-chunksize",
+            "2",
             "--output-dir",
-            str(output_dir),
+            str(output),
         ],
         check=True,
         capture_output=True,
@@ -129,6 +144,6 @@ def test_cli_writes_reports(tmp_path) -> None:
         env=env,
     )
 
-    assert (output_dir / "audit.json").is_file()
-    assert (output_dir / "audit.md").is_file()
+    assert (output / "audit.json").is_file()
+    assert (output / "audit.md").is_file()
     assert "Wrote" in result.stdout
