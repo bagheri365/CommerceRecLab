@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+title: MatchLab
+message: "If you use MatchLab, please cite this repository."
+type: software
+authors:
+  - family-names: Bagheri
+repository-code: "https://github.com/bagheri365/MatchLab"
+license: Apache-2.0
+version: 0.1.0

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Build
+build/
+dist/
+
+# Data and experiment outputs
+# Keep small, intentional fixtures under tests/fixtures if needed.
+data/raw/
+data/interim/
+data/processed/
+artifacts/*
+!artifacts/.gitkeep
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Environment / secrets
+.env
+.env.*
