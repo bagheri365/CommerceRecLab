@@ -6,6 +6,34 @@
 
 CommerceRecLab is a system-design and experimentation project built around the Retailrocket e-commerce dataset. The project emphasizes reproducible offline evaluation, temporal correctness, candidate-generation quality, ranking tradeoffs, catalog behavior, and serving architecture rather than a single benchmark model.
 
+
+## v1.0 result
+
+The first Retailrocket research arc is complete. The conservative selected architecture is:
+
+```text
+session prefix
+    ↓
+c300_b100_p0 candidate generation
+(category depth 300, behavioral depth 100, parent depth 0)
+    ↓
+category-first deterministic ranking
+    ↓
+top-K recommendations
+```
+
+The main empirical conclusion is that **candidate generation and category context earned their complexity; increasingly elaborate reranking did not** under the frozen offline protocol. Expanded retrieval was retained in v0.6, v0.7 selected a much smaller Pareto-efficient operating point, while equal-weight fusion, task-specific logistic reranking, reranking after stronger retrieval, and funnel-stage conditioning were all rejected by their predeclared validation rules.
+
+The v0.8 learned ranker did improve view NDCG in isolation, so it remains an explicitly exploratory view-only follow-up rather than a retained component of the conservative final system. See [`docs/v1_0_final_system_selection.md`](docs/v1_0_final_system_selection.md).
+
+Generate the retrospective benchmark from the frozen experiment artifacts with:
+
+```bash
+python -m commercereclab.evaluation.final \
+  --artifacts-root artifacts \
+  --output-dir artifacts/v1_0_final_system_selection
+```
+
 ## Scientific principle
 
 ```text
@@ -69,7 +97,7 @@ Every empirical experiment must state:
 
 The project distinguishes tasks such as next-item retrieval, event-type prediction, funnel-aware ranking, and transaction-oriented reranking rather than treating them as interchangeable.
 
-## Planned system components
+## System components
 
 ```text
 data audit
@@ -84,7 +112,7 @@ data audit
 → serving & graceful degradation
 ```
 
-Planned experiments include:
+The roadmap includes experiments such as:
 
 - popularity and recency baselines;
 - co-visitation and session-based retrieval;
@@ -256,4 +284,14 @@ python -m commercereclab.evaluation.stage \
   data/raw/retailrocket \
   --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
   --output-dir artifacts/v0_9_stage_aware_ranking
+```
+
+### v1.0 — Final system selection + retrospective
+
+v1.0 reads the frozen v0.3–v0.9 artifact JSONs, validates the expected retain/reject decisions, generates one retrospective benchmark, and records the conservative final architecture. It does not retroactively promote interventions that failed their predeclared validation rules. See `docs/v1_0_final_system_selection.md`.
+
+```bash
+python -m commercereclab.evaluation.final \
+  --artifacts-root artifacts \
+  --output-dir artifacts/v1_0_final_system_selection
 ```
