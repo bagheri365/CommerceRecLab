@@ -196,3 +196,64 @@ python -m commercereclab.evaluation.baselines \
 ```
 
 The baseline table keeps future view, cart, and transaction objectives separate and uses the frozen v0.2 session and temporal contracts. See [`docs/v0_3_behavioral_baselines.md`](docs/v0_3_behavioral_baselines.md).
+
+## v0.4 — Hybrid behavioral scoring + ablation
+
+Test whether category context, co-visitation, recency, and visitor history provide complementary signal before introducing a learned ranker:
+
+```bash
+python -m commercereclab.evaluation.hybrid \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_4_hybrid_ablation
+```
+
+The fusion uses fixed equal-weight reciprocal-rank fusion and validation-only retain/reject logic. See [`docs/v0_4_hybrid_behavioral_ablation.md`](docs/v0_4_hybrid_behavioral_ablation.md).
+
+### v0.5 — Learned task-specific rankers
+
+v0.5 tests whether separate lightweight logistic rankers can learn task-specific weights over category, co-visitation, recency, and visitor-history retrieval signals without using validation outcomes for fitting. See `docs/v0_5_learned_task_specific_rankers.md`.
+
+### v0.6 — Candidate generation / retrieval
+
+v0.6 moves upstream from reranking and tests whether deeper behavioral and category-hierarchy retrieval can increase candidate recall without future metadata leakage. It reports candidate recall together with candidate-set size and fixed-RRF ranking diagnostics. See `docs/v0_6_candidate_retrieval.md`.
+
+```bash
+python -m commercereclab.evaluation.retrieval \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_6_candidate_retrieval
+```
+
+### v0.7 — Retrieval efficiency / Pareto frontier
+
+v0.7 sweeps category, behavioral, and parent-category retrieval depths to identify validation Pareto-efficient candidate generators. The selection rule preserves a declared fraction of expanded-reference recall for every task while minimizing mean candidate-set size. See `docs/v0_7_retrieval_efficiency.md`.
+
+```bash
+python -m commercereclab.evaluation.efficiency \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_7_retrieval_efficiency
+```
+
+### v0.8 — Learned reranking on efficient retrieval
+
+v0.8 revisits task-specific logistic reranking after freezing the v0.7-selected efficient candidate generator (`c300_b100_p0`). It compares learned reranking against deep category-only and fixed-RRF deterministic baselines on the same retrieval regime, with validation-only retain/reject logic. See `docs/v0_8_learned_reranking_efficient_retrieval.md`.
+
+```bash
+python -m commercereclab.evaluation.rerank \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_8_efficient_reranker
+```
+
+### v0.9 — Funnel-aware / stage-conditional ranking
+
+v0.9 tests whether explicitly conditioning ranking on observed session stage resolves the task/context heterogeneity seen in v0.4, v0.5, and v0.8. It freezes the v0.7 efficient retriever (`c300_b100_p0`), compares stage-conditioned logistic rankers against category-only and pooled task-specific ranking, and uses validation only for retain/reject decisions. See `docs/v0_9_stage_aware_ranking.md`.
+
+```bash
+python -m commercereclab.evaluation.stage \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_9_stage_aware_ranking
+```
