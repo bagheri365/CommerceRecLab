@@ -183,3 +183,16 @@ python -m commercereclab.evaluation.temporal \
 ```
 
 See [`docs/v0_2_temporal_evaluation_protocol.md`](docs/v0_2_temporal_evaluation_protocol.md).
+
+## v0.3 — Behavioral baselines
+
+Measure how far simple train-only heuristics can go before introducing learned personalization:
+
+```bash
+python -m commercereclab.evaluation.baselines \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_3_behavioral_baselines
+```
+
+The baseline table keeps future view, cart, and transaction objectives separate and uses the frozen v0.2 session and temporal contracts. See [`docs/v0_3_behavioral_baselines.md`](docs/v0_3_behavioral_baselines.md).
