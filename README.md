@@ -171,3 +171,15 @@ python -m commercereclab.evaluation.observation \
 ```
 
 This milestone is descriptive. It does not infer recommendation impressions or convert missing visitor-item pairs into negatives. See [`docs/v0_1_observation_semantics.md`](docs/v0_1_observation_semantics.md).
+
+## v0.2 — Temporal evaluation protocol
+
+Freeze time-respecting train/validation/test cutoffs, sessionization, candidate-set semantics, and point-in-time leakage rules before fitting ranking models:
+
+```bash
+python -m commercereclab.evaluation.temporal \
+  data/raw/retailrocket/events.csv \
+  --output-dir artifacts/v0_2_temporal_protocol
+```
+
+See [`docs/v0_2_temporal_evaluation_protocol.md`](docs/v0_2_temporal_evaluation_protocol.md).
