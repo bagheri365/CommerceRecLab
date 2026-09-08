@@ -1,50 +1,83 @@
 # CommerceRecLab
 
-**Research-oriented e-commerce recommender system for session intent, candidate generation, funnel-aware ranking, cold start, catalog exposure, and serving tradeoffs.**
+**An end-to-end e-commerce recommender-systems case study: from raw behavioral logs to a final retrieval + ranking design.**
 
-> **Research question:** How should an e-commerce recommender balance user intent, product relevance, conversion opportunity, availability, catalog coverage, freshness, and serving cost?
+> **Research question:** How should an e-commerce recommender balance user intent, product relevance, conversion opportunity, catalog coverage, freshness, and serving cost?
 
-CommerceRecLab is a system-design and experimentation project built around the Retailrocket e-commerce dataset. The project emphasizes reproducible offline evaluation, temporal correctness, candidate-generation quality, ranking tradeoffs, catalog behavior, and serving architecture rather than a single benchmark model.
+CommerceRecLab is a reproducible research project built on the Retailrocket e-commerce dataset. It does not start by assuming that a complex model is best. Instead, it tests increasingly sophisticated ideas under one frozen temporal evaluation protocol and keeps only the changes that earn their place on validation data.
 
+## At a glance
 
-## v1.0 result
+| | |
+|---|---|
+| **Data** | Retailrocket visitor-item events: views, add-to-cart actions, transactions, and time-varying item metadata |
+| **Problem** | Recommend useful products from the current session while balancing relevance, conversion-oriented intent, catalog coverage, and serving cost |
+| **Final design** | `c300_b100_p0` candidate retrieval + category-first deterministic ranking |
+| **Main result** | The selected retriever uses about **54% fewer candidates** than the expanded reference while retaining about **97% of its task-level recall** |
+| **Main lesson** | Better retrieval and category context helped consistently; more elaborate reranking did not consistently beat the simple category-first baseline |
+| **Evaluation** | Leakage-safe temporal splits, point-in-time metadata, validation-only model decisions, test-only confirmation |
 
-The first Retailrocket research arc is complete. The conservative selected architecture is:
+If you only have a minute, read **At a glance**, **Final system**, and **What we tried**. The rest documents the research protocol and reproducibility details.
+
+## Final system
+
+The conservative v1.0 architecture is:
 
 ```text
-session prefix
-    ↓
+current session context
+        ↓
 c300_b100_p0 candidate generation
 (category depth 300, behavioral depth 100, parent depth 0)
-    ↓
+        ↓
 category-first deterministic ranking
-    ↓
+        ↓
 top-K recommendations
 ```
 
-The main empirical conclusion is that **candidate generation and category context earned their complexity; increasingly elaborate reranking did not** under the frozen offline protocol. Expanded retrieval was retained in v0.6, v0.7 selected a much smaller Pareto-efficient operating point, while equal-weight fusion, task-specific logistic reranking, reranking after stronger retrieval, and funnel-stage conditioning were all rejected by their predeclared validation rules.
+In plain English, the system first builds a manageable shortlist of plausible products, using category context most heavily and behavioral signals at a smaller depth. It then ranks that shortlist with a simple category-first policy.
 
-The v0.8 learned ranker did improve view NDCG in isolation, so it remains an explicitly exploratory view-only follow-up rather than a retained component of the conservative final system. See [`docs/v1_0_final_system_selection.md`](docs/v1_0_final_system_selection.md).
+### What we learned
 
-Generate the retrospective benchmark from the frozen experiment artifacts with:
+> **Retrieval quality and category context earned their complexity; more elaborate reranking did not under the frozen offline protocol.**
 
-```bash
-python -m commercereclab.evaluation.final \
-  --artifacts-root artifacts \
-  --output-dir artifacts/v1_0_final_system_selection
-```
+The selected retriever preserves most of the expanded system's coverage while roughly halving the number of candidates that must be ranked:
 
-## Scientific principle
+| Metric | Selected `c300_b100_p0` | Expanded reference |
+|---|---:|---:|
+| Test mean candidates | **319.1** | 689.6 |
+| Test view candidate recall | **0.6222** | 0.6441 |
+| Test cart candidate recall | **0.6420** | 0.6616 |
+| Test transaction candidate recall | **0.6366** | 0.6512 |
+
+The final category-first ranking reference is:
+
+| Task | Test NDCG@20 |
+|---|---:|
+| View | **0.1252** |
+| Add-to-cart | **0.1497** |
+| Transaction | **0.1542** |
+
+**How to read these numbers:** candidate recall asks whether the true future item appears anywhere in the generated shortlist. NDCG@20 then asks whether relevant items are placed near the top of the final 20 recommendations. Higher is better for both.
+
+A learned view reranker reached test NDCG@20 **0.1349**, but it remains exploratory follow-up evidence rather than part of the final architecture because the predeclared v0.8 system-level retain rule failed.
+
+See [`docs/v1_0_final_system_selection.md`](docs/v1_0_final_system_selection.md) for the full retrospective.
+
+## How the project was run
 
 ```text
 baseline → measurable failure → targeted intervention → evaluate → retain / reject
 ```
 
-Complexity must earn its place through evidence. Negative results and failed interventions remain part of the project record.
+Three rules guide the project:
 
-## Primary empirical dataset
+1. **Define what the data actually observes.** A missing visitor-item event is unknown, not a dislike and not proof that a recommendation failed.
+2. **Prevent future information from leaking backward.** Time splits, session boundaries, candidate eligibility, and item metadata are fixed before model comparison.
+3. **Make complexity earn its place.** If a more complicated method does not improve the predeclared validation criteria, it is rejected and the negative result stays in the record.
 
-CommerceRecLab uses Retailrocket's public e-commerce behavior data:
+## Data and what counts as feedback
+
+CommerceRecLab uses Retailrocket's public e-commerce data:
 
 ```text
 events.csv
@@ -53,19 +86,13 @@ item_properties_part2.csv
 category_tree.csv
 ```
 
-The behavioral funnel contains timestamped:
+The behavioral log contains timestamped:
 
 ```text
 view → addtocart → transaction
 ```
 
-The item-property tables provide time-varying product state, and the category tree provides hierarchical catalog structure.
-
-Raw data are kept under `data/raw/` and are not committed to Git.
-
-## Observation semantics
-
-An observed event means that Retailrocket recorded a visitor-item event at a timestamp. It does **not** mean that every item without an event was shown and rejected.
+An observed event means Retailrocket recorded a visitor-item action at a timestamp. It does **not** establish that unobserved items were shown and rejected.
 
 ```text
 observed (visitor, item, event, time)
@@ -76,55 +103,124 @@ missing visitor-item pair
     ≠ observed negative
 ```
 
-Recommendation experiments therefore define candidate sets, labels, temporal cutoffs, and negative/comparison construction explicitly.
+Item properties are time-varying, so historical features use point-in-time joins only. Future catalog state must never leak into past recommendations. Cart and transaction ranking metrics are conditional on queries containing corresponding future targets; they are **not** conversion-probability estimates.
 
-Time-varying item properties must be joined **as of recommendation time**. Future product state must never leak into historical predictions.
+See [`docs/data_semantics.md`](docs/data_semantics.md) and [`docs/v0_2_temporal_evaluation_protocol.md`](docs/v0_2_temporal_evaluation_protocol.md).
 
-See [`docs/data_semantics.md`](docs/data_semantics.md) and the full [`docs/roadmap.md`](docs/roadmap.md).
+## What we tried
 
-## Evaluation discipline
+| Milestone | Intervention | Decision | Main result |
+|---|---|---|---|
+| v0.3 | Behavioral baselines | Reference | Category-conditioned popularity was strongest across view/cart/transaction |
+| v0.4 | Equal-weight behavioral fusion | Reject | Mean validation NDCG 0.1163 vs category-only 0.1692 |
+| v0.5 | Task-specific logistic rankers | Reject | View improved, cart/transaction NDCG degraded |
+| v0.6 | Expanded candidate retrieval | **Retain** | Mean validation candidate recall 0.6110 → 0.7223 |
+| v0.7 | Retrieval efficiency sweep | **Select** | `c300_b100_p0` retained ≥95% of expanded-reference recall per task |
+| v0.8 | Learned reranking on efficient retrieval | Reject | Stronger retrieval did not rescue cart/transaction learned ranking |
+| v0.9 | Funnel-stage conditional ranking | Reject | Post-cart transaction improved over pooled learned ranking but remained below category-only |
+| v1.0 | Final retrospective | Finalize | Select efficient retrieval + category-first ranking |
 
-Every empirical experiment must state:
+The table is the short version of the research story: retrieval improvements survived validation; most reranking complexity did not. Detailed milestone reports live under [`docs/`](docs/).
 
-1. the prediction or ranking estimand;
-2. the temporal train / validation / test split;
-3. the candidate universe;
-4. label construction;
-5. negative/comparison construction;
-6. point-in-time feature rules;
-7. prohibited leakage;
-8. which claims the result supports.
+## How evaluation stayed fair
 
-The project distinguishes tasks such as next-item retrieval, event-type prediction, funnel-aware ranking, and transaction-oriented reranking rather than treating them as interchangeable.
+The frozen offline protocol uses:
 
-## System components
+- deterministic temporal train/validation/test splits;
+- 30-minute inactivity sessionization;
+- split boundaries that force new sessions;
+- prediction horizon = remainder of the current split-bounded session;
+- backward point-in-time item-property joins;
+- candidate eligibility restricted to information available at prediction time;
+- no transaction IDs as pre-outcome features;
+- separate view, add-to-cart, and transaction objectives;
+- validation-only retain/reject decisions and test-only confirmation.
 
-```text
-data audit
-→ observation & temporal semantics
-→ behavioral baselines
-→ session / user intent
-→ candidate generation
-→ feature hydration
-→ ranking
-→ funnel-aware reranking
-→ catalog / availability policy
-→ serving & graceful degradation
+These rules are implemented in `src/commercereclab/evaluation/` and summarized in [`docs/v0_2_temporal_evaluation_protocol.md`](docs/v0_2_temporal_evaluation_protocol.md).
+
+## Run it yourself
+
+### 1. Environment
+
+CommerceRecLab requires Python 3.11+.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-The roadmap includes experiments such as:
+Run the test suite:
 
-- popularity and recency baselines;
-- co-visitation and session-based retrieval;
-- collaborative and latent retrieval;
-- multi-source candidate generation;
-- click / cart / transaction-aware ranking;
-- new-item and sparse-history behavior;
-- time-varying item-property features;
-- category-aware retrieval and reranking;
-- catalog exposure concentration and coverage;
-- exact vs. approximate retrieval at larger scale;
-- online serving, latency budgets, caching, and fallbacks.
+```bash
+python -m pytest
+```
+
+Run lint checks:
+
+```bash
+ruff check .
+```
+
+### 2. Data
+
+Place the Retailrocket files under:
+
+```text
+data/raw/retailrocket/
+├── events.csv
+├── item_properties_part1.csv
+├── item_properties_part2.csv
+└── category_tree.csv
+```
+
+Raw data are intentionally not committed to Git.
+
+### 3. Freeze the temporal protocol
+
+```bash
+python -m commercereclab.evaluation.temporal \
+  data/raw/retailrocket/events.csv \
+  --output-dir artifacts/v0_2_temporal_protocol
+```
+
+### 4. Run the final retained retrieval/ranking evidence
+
+```bash
+python -m commercereclab.evaluation.efficiency \
+  data/raw/retailrocket \
+  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
+  --output-dir artifacts/v0_7_retrieval_efficiency
+```
+
+### 5. Generate the v1.0 retrospective
+
+After generating the v0.3-v0.9 artifacts:
+
+```bash
+python -m commercereclab.evaluation.final \
+  --artifacts-root artifacts \
+  --output-dir artifacts/v1_0_final_system_selection
+```
+
+The retrospective CLI validates the expected retained/rejected decisions and fails if required milestone artifacts are missing or inconsistent.
+
+## Detailed experiment reports
+
+| Version | Topic | Report |
+|---|---|---|
+| v0.0 | Dataset + observation audit | [`docs/v0_0_dataset_observation_audit.md`](docs/v0_0_dataset_observation_audit.md) |
+| v0.1 | Observation semantics | [`docs/v0_1_observation_semantics.md`](docs/v0_1_observation_semantics.md) |
+| v0.2 | Temporal evaluation protocol | [`docs/v0_2_temporal_evaluation_protocol.md`](docs/v0_2_temporal_evaluation_protocol.md) |
+| v0.3 | Behavioral baselines | [`docs/v0_3_behavioral_baselines.md`](docs/v0_3_behavioral_baselines.md) |
+| v0.4 | Hybrid behavioral ablation | [`docs/v0_4_hybrid_behavioral_ablation.md`](docs/v0_4_hybrid_behavioral_ablation.md) |
+| v0.5 | Learned task-specific rankers | [`docs/v0_5_learned_task_specific_rankers.md`](docs/v0_5_learned_task_specific_rankers.md) |
+| v0.6 | Candidate retrieval | [`docs/v0_6_candidate_retrieval.md`](docs/v0_6_candidate_retrieval.md) |
+| v0.7 | Retrieval efficiency frontier | [`docs/v0_7_retrieval_efficiency.md`](docs/v0_7_retrieval_efficiency.md) |
+| v0.8 | Learned reranking on efficient retrieval | [`docs/v0_8_learned_reranking_efficient_retrieval.md`](docs/v0_8_learned_reranking_efficient_retrieval.md) |
+| v0.9 | Stage-conditional ranking | [`docs/v0_9_stage_aware_ranking.md`](docs/v0_9_stage_aware_ranking.md) |
+| v1.0 | Final system selection | [`docs/v1_0_final_system_selection.md`](docs/v1_0_final_system_selection.md) |
 
 ## Repository structure
 
@@ -138,160 +234,23 @@ CommerceRecLab/
 ├── experiments/
 ├── artifacts/
 ├── docs/
-│   ├── roadmap.md
-│   └── data_semantics.md
 ├── src/
 │   └── commercereclab/
-│       ├── data/
 │       ├── audit/
+│       ├── data/
 │       ├── eligibility/
-│       ├── retrieval/
+│       ├── evaluation/
 │       ├── features/
 │       ├── models/
-│       ├── ranking/
-│       ├── reciprocity/
 │       ├── policy/
-│       ├── simulation/
-│       ├── serving/
-│       └── evaluation/
+│       ├── ranking/
+│       ├── retrieval/
+│       └── serving/
 └── tests/
 ```
 
+## What this project does — and does not — claim
 
-## Development
+CommerceRecLab is an offline research benchmark and portfolio project, not a claim to reproduce a retailer's production recommender. The results support conclusions about the defined Retailrocket tasks and frozen evaluation protocol. They do **not** establish causal sales lift, online conversion impact, or real production latency.
 
-Create and activate a virtual environment, then install development dependencies:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-Run the test suite:
-
-```bash
-pytest
-```
-
-Run lint checks:
-
-```bash
-ruff check .
-```
-
-## Roadmap
-
-The detailed, scientifically revised build plan lives in [`docs/roadmap.md`](docs/roadmap.md).
-
-The first Retailrocket milestones are methodological: establish the dataset contract, temporal observation semantics, and leakage-safe evaluation protocol before adding complex models.
-
-## Scope and claim discipline
-
-CommerceRecLab is not presented as a reproduction of any production retailer's recommender system. Results from Retailrocket support claims about the defined offline tasks and dataset. Systems simulations and scaling experiments are labeled separately and are not presented as observed production effects.
-
-## v0.1 — Observation semantics
-
-After completing the dataset audit, measure which funnel paths are actually present in the event log:
-
-```bash
-python -m commercereclab.evaluation.observation \
-  data/raw/retailrocket/events.csv \
-  --output-dir artifacts/v0_1_observation_semantics
-```
-
-This milestone is descriptive. It does not infer recommendation impressions or convert missing visitor-item pairs into negatives. See [`docs/v0_1_observation_semantics.md`](docs/v0_1_observation_semantics.md).
-
-## v0.2 — Temporal evaluation protocol
-
-Freeze time-respecting train/validation/test cutoffs, sessionization, candidate-set semantics, and point-in-time leakage rules before fitting ranking models:
-
-```bash
-python -m commercereclab.evaluation.temporal \
-  data/raw/retailrocket/events.csv \
-  --output-dir artifacts/v0_2_temporal_protocol
-```
-
-See [`docs/v0_2_temporal_evaluation_protocol.md`](docs/v0_2_temporal_evaluation_protocol.md).
-
-## v0.3 — Behavioral baselines
-
-Measure how far simple train-only heuristics can go before introducing learned personalization:
-
-```bash
-python -m commercereclab.evaluation.baselines \
-  data/raw/retailrocket \
-  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
-  --output-dir artifacts/v0_3_behavioral_baselines
-```
-
-The baseline table keeps future view, cart, and transaction objectives separate and uses the frozen v0.2 session and temporal contracts. See [`docs/v0_3_behavioral_baselines.md`](docs/v0_3_behavioral_baselines.md).
-
-## v0.4 — Hybrid behavioral scoring + ablation
-
-Test whether category context, co-visitation, recency, and visitor history provide complementary signal before introducing a learned ranker:
-
-```bash
-python -m commercereclab.evaluation.hybrid \
-  data/raw/retailrocket \
-  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
-  --output-dir artifacts/v0_4_hybrid_ablation
-```
-
-The fusion uses fixed equal-weight reciprocal-rank fusion and validation-only retain/reject logic. See [`docs/v0_4_hybrid_behavioral_ablation.md`](docs/v0_4_hybrid_behavioral_ablation.md).
-
-### v0.5 — Learned task-specific rankers
-
-v0.5 tests whether separate lightweight logistic rankers can learn task-specific weights over category, co-visitation, recency, and visitor-history retrieval signals without using validation outcomes for fitting. See `docs/v0_5_learned_task_specific_rankers.md`.
-
-### v0.6 — Candidate generation / retrieval
-
-v0.6 moves upstream from reranking and tests whether deeper behavioral and category-hierarchy retrieval can increase candidate recall without future metadata leakage. It reports candidate recall together with candidate-set size and fixed-RRF ranking diagnostics. See `docs/v0_6_candidate_retrieval.md`.
-
-```bash
-python -m commercereclab.evaluation.retrieval \
-  data/raw/retailrocket \
-  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
-  --output-dir artifacts/v0_6_candidate_retrieval
-```
-
-### v0.7 — Retrieval efficiency / Pareto frontier
-
-v0.7 sweeps category, behavioral, and parent-category retrieval depths to identify validation Pareto-efficient candidate generators. The selection rule preserves a declared fraction of expanded-reference recall for every task while minimizing mean candidate-set size. See `docs/v0_7_retrieval_efficiency.md`.
-
-```bash
-python -m commercereclab.evaluation.efficiency \
-  data/raw/retailrocket \
-  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
-  --output-dir artifacts/v0_7_retrieval_efficiency
-```
-
-### v0.8 — Learned reranking on efficient retrieval
-
-v0.8 revisits task-specific logistic reranking after freezing the v0.7-selected efficient candidate generator (`c300_b100_p0`). It compares learned reranking against deep category-only and fixed-RRF deterministic baselines on the same retrieval regime, with validation-only retain/reject logic. See `docs/v0_8_learned_reranking_efficient_retrieval.md`.
-
-```bash
-python -m commercereclab.evaluation.rerank \
-  data/raw/retailrocket \
-  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
-  --output-dir artifacts/v0_8_efficient_reranker
-```
-
-### v0.9 — Funnel-aware / stage-conditional ranking
-
-v0.9 tests whether explicitly conditioning ranking on observed session stage resolves the task/context heterogeneity seen in v0.4, v0.5, and v0.8. It freezes the v0.7 efficient retriever (`c300_b100_p0`), compares stage-conditioned logistic rankers against category-only and pooled task-specific ranking, and uses validation only for retain/reject decisions. See `docs/v0_9_stage_aware_ranking.md`.
-
-```bash
-python -m commercereclab.evaluation.stage \
-  data/raw/retailrocket \
-  --manifest artifacts/v0_2_temporal_protocol/temporal_split_manifest.json \
-  --output-dir artifacts/v0_9_stage_aware_ranking
-```
-
-### v1.0 — Final system selection + retrospective
-
-v1.0 reads the frozen v0.3–v0.9 artifact JSONs, validates the expected retain/reject decisions, generates one retrospective benchmark, and records the conservative final architecture. It does not retroactively promote interventions that failed their predeclared validation rules. See `docs/v1_0_final_system_selection.md`.
-
-```bash
-python -m commercereclab.evaluation.final \
-  --artifacts-root artifacts \
-  --output-dir artifacts/v1_0_final_system_selection
-```
+For the full research plan and system-design extensions, see [`docs/roadmap.md`](docs/roadmap.md).
